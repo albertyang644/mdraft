@@ -1,0 +1,5 @@
+/home/albert/projects/mdraft/tests/build/CMakeFiles/core_smoke_test.dir
+/home/albert/projects/mdraft/tests/build/CMakeFiles/edit_cache.dir
+/home/albert/projects/mdraft/tests/build/CMakeFiles/rebuild_cache.dir
+/home/albert/projects/mdraft/tests/build/CMakeFiles/core_smoke_test_autogen_timestamp_deps.dir
+/home/albert/projects/mdraft/tests/build/CMakeFiles/core_smoke_test_autogen.dir

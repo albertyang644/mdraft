@@ -1,0 +1,34 @@
+# TASKS.md
+
+- [x] Decide primary implementation direction: C++ + Qt.
+- [x] Decide compiled desktop app as the performance baseline.
+- [x] Decide load-on-open-only semantics for the rendered WebView preview.
+- [x] Record hard WebView startup contract.
+- [ ] Choose Qt major version and required modules.
+- [ ] Choose Markdown parser/renderer for GitHub Flavored Markdown.
+- [ ] Create C++/Qt project skeleton.
+- [ ] Create main application window.
+- [ ] Add three-panel layout.
+- [ ] Add hide/show behavior for left index panel.
+- [ ] Add hide/show behavior for right preview panel.
+- [ ] Implement native left outline/index panel.
+- [ ] Implement central Markdown editor.
+- [ ] Add bottom status area.
+- [ ] Add live word count.
+- [ ] Add live character count.
+- [ ] Add font family control.
+- [ ] Add font size control.
+- [ ] Add light/dark mode toggle.
+- [ ] Add Ghostwriter-inspired menu structure.
+- [ ] Implement lazy preview creation when right panel opens.
+- [ ] Implement preview destruction when right panel closes.
+- [ ] Verify no WebView is created on initial launch.
+- [ ] Debounce rendered preview updates.
+- [ ] Debounce or safely background outline/statistics updates.
+- [ ] Add HTML export engine.
+- [ ] Add PDF export engine.
+- [ ] Add LaTeX/Pandoc-compatible export path where available.
+- [ ] Ensure export engine detection does not block initial editor startup.
+- [ ] Add startup/performance tests or checks.
+- [ ] Add editor responsiveness tests or checks.
+- [ ] Add documentation after success criteria are met.

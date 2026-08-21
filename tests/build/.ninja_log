@@ -1,0 +1,21 @@
+# ninja log v5
+1	527	1787323646970763179	core_smoke_test_autogen/timestamp	cbaf58f7407e7686
+1	527	1787323646970763179	core_smoke_test_autogen/mocs_compilation.cpp	cbaf58f7407e7686
+1	527	1787323646970763179	/home/albert/projects/mdraft/tests/build/core_smoke_test_autogen/timestamp	cbaf58f7407e7686
+1	527	1787323646970763179	/home/albert/projects/mdraft/tests/build/core_smoke_test_autogen/mocs_compilation.cpp	cbaf58f7407e7686
+528	1489	1787323647940765895	CMakeFiles/core_smoke_test.dir/home/albert/projects/mdraft/src/outline_model.cpp.o	cdba6517639e2ca2
+528	1606	1787323648058766225	CMakeFiles/core_smoke_test.dir/home/albert/projects/mdraft/src/editor.cpp.o	4a2a7ec8dedaa033
+528	1637	1787323648089766311	CMakeFiles/core_smoke_test.dir/home/albert/projects/mdraft/src/highlighter.cpp.o	42e5f95995b857aa
+528	1638	1787323648089766311	CMakeFiles/core_smoke_test.dir/core_smoke_test_autogen/mocs_compilation.cpp.o	beda9f41c4c75fc0
+4	491	1787323666578817376	core_smoke_test_autogen/timestamp	cbaf58f7407e7686
+4	491	1787323666578817376	core_smoke_test_autogen/mocs_compilation.cpp	cbaf58f7407e7686
+4	491	1787323666578817376	/home/albert/projects/mdraft/tests/build/core_smoke_test_autogen/timestamp	cbaf58f7407e7686
+4	491	1787323666578817376	/home/albert/projects/mdraft/tests/build/core_smoke_test_autogen/mocs_compilation.cpp	cbaf58f7407e7686
+491	1543	1787323667639820268	CMakeFiles/core_smoke_test.dir/core_smoke_test_autogen/mocs_compilation.cpp.o	beda9f41c4c75fc0
+492	1569	1787323667665820339	CMakeFiles/core_smoke_test.dir/home/albert/projects/mdraft/src/editor.cpp.o	4a2a7ec8dedaa033
+3	482	1787323679127851318	core_smoke_test_autogen/timestamp	cbaf58f7407e7686
+3	482	1787323679127851318	core_smoke_test_autogen/mocs_compilation.cpp	cbaf58f7407e7686
+3	482	1787323679127851318	/home/albert/projects/mdraft/tests/build/core_smoke_test_autogen/timestamp	cbaf58f7407e7686
+3	482	1787323679127851318	/home/albert/projects/mdraft/tests/build/core_smoke_test_autogen/mocs_compilation.cpp	cbaf58f7407e7686
+484	2762	1787323681408857427	CMakeFiles/core_smoke_test.dir/core_smoke_test.cpp.o	1789fdd1d6a7fe68
+2763	3039	1787323681681514509	core_smoke_test	362ca31d197de30b
