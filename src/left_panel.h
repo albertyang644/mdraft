@@ -7,6 +7,7 @@ class QPushButton;
 class QStackedWidget;
 class QListWidget;
 class QListWidgetItem;
+class QLabel;
 class OutlineView;
 class OutlineModel;
 
@@ -42,6 +43,7 @@ private:
     void showDirListing();
     void refreshDirListing();
     void applyToggleBarStyle();
+    void applyDirHeaderStyle();
 
     QWidget *m_toggleBar;
     QPushButton *m_outlineBtn;
@@ -49,6 +51,7 @@ private:
     QStackedWidget *m_stack;
     OutlineView *m_outlineView;
     QListWidget *m_dirView;
+    QLabel *m_dirPathLabel; // "└─ /path/to/dir" header shown above the DIR list
     QString m_currentDir;
     bool m_dark;
 };

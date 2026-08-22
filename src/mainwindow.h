@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QPointer>
 
 class QSplitter;
 class QLabel;
@@ -29,6 +30,9 @@ public:
     // in the left panel's DIR view). Reuses an already-open tab if the file
     // is already open; otherwise opens it in a new tab.
     void openFileAt(const QString &path, const QString &content);
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     // File
@@ -74,6 +78,16 @@ private:
     void syncActiveTabUi();
     QString filePathOfEditor(MarkdownEditor *ed) const;
     void setFilePathOfEditor(MarkdownEditor *ed, const QString &path);
+
+    // Autosave: a few seconds after you stop typing, a tab that already has
+    // a file path is saved silently. Tabs with no path (Untitled) can't be
+    // autosaved anywhere, so those are the only ones that ever prompt before
+    // being discarded (tab close / app quit).
+    void updateTabModifiedIndicator(MarkdownEditor *ed);
+    void flushAutosave(MarkdownEditor *ed);
+
+    QTimer *m_autosaveDebounce;
+    QPointer<MarkdownEditor> m_autosaveTarget;
 
     QSplitter *m_splitter;
     ShutterPanel *m_leftShutter;

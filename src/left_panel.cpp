@@ -8,6 +8,7 @@
 #include <QButtonGroup>
 #include <QStackedWidget>
 #include <QListWidget>
+#include <QLabel>
 #include <QFileInfo>
 #include <QDir>
 #include <QPainter>
@@ -71,15 +72,34 @@ LeftPanel::LeftPanel(QWidget *parent)
     // --- Content stack ---
     m_stack = new QStackedWidget(this);
     m_outlineView = new OutlineView(m_stack);
-    m_dirView = new QListWidget(m_stack);
+
+    // DIR page: a "└─ /path" header above the file list, so the directory
+    // you're browsing is visible right where you're clicking into it (the
+    // bottom status bar shows the *open file's* directory, which is a
+    // different thing once you've clicked into a sibling).
+    QWidget *dirPage = new QWidget(m_stack);
+    auto *dirLayout = new QVBoxLayout(dirPage);
+    dirLayout->setContentsMargins(0, 0, 0, 0);
+    dirLayout->setSpacing(0);
+
+    m_dirPathLabel = new QLabel(dirPage);
+    m_dirPathLabel->setContentsMargins(8, 4, 8, 4);
+    m_dirPathLabel->setWordWrap(true);
+
+    m_dirView = new QListWidget(dirPage);
     m_dirView->setFrameShape(QFrame::NoFrame);
     connect(m_dirView, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
         const QString path = item->data(Qt::UserRole).toString();
         if (!path.isEmpty())
             emit fileActivated(path);
     });
+
+    dirLayout->addWidget(m_dirPathLabel);
+    dirLayout->addWidget(m_dirView, 1);
+    applyDirHeaderStyle();
+
     m_stack->addWidget(m_outlineView); // index 0: outline
-    m_stack->addWidget(m_dirView);     // index 1: dir listing
+    m_stack->addWidget(dirPage);       // index 1: dir listing
 
     outer->addWidget(m_toggleBar);
     outer->addWidget(m_stack, 1);
@@ -104,6 +124,7 @@ void LeftPanel::setDarkMode(bool dark)
         return;
     m_dark = dark;
     applyToggleBarStyle();
+    applyDirHeaderStyle();
 }
 
 void LeftPanel::applyToggleBarStyle()
@@ -127,30 +148,42 @@ void LeftPanel::applyToggleBarStyle()
     m_outlineBtn->setIcon(makeOutlineIcon(m_dark));
 }
 
+void LeftPanel::applyDirHeaderStyle()
+{
+    const QString bg = m_dark ? "#232323" : "#eef2f7";
+    const QString border = m_dark ? "#3a3a3a" : "#dde4ec";
+    const QString text = m_dark ? "#9aa7b8" : "#5a6b82";
+    m_dirPathLabel->setStyleSheet(
+        QString("QLabel { background:%1; border-bottom:1px solid %2; color:%3; font-size:11px; }")
+            .arg(bg, border, text));
+}
+
 void LeftPanel::setCurrentFilePath(const QString &path)
 {
     m_currentDir = path.isEmpty() ? QString() : QFileInfo(path).absolutePath();
-    if (m_stack->currentWidget() == m_dirView)
+    if (m_stack->currentIndex() == 1)
         refreshDirListing();
 }
 
 void LeftPanel::showOutline()
 {
     m_outlineBtn->setChecked(true);
-    m_stack->setCurrentWidget(m_outlineView);
+    m_stack->setCurrentIndex(0);
     QSettings().setValue("leftPanelDirMode", false);
 }
 
 void LeftPanel::showDirListing()
 {
     m_dirBtn->setChecked(true);
-    m_stack->setCurrentWidget(m_dirView);
+    m_stack->setCurrentIndex(1);
     QSettings().setValue("leftPanelDirMode", true);
     refreshDirListing();
 }
 
 void LeftPanel::refreshDirListing()
 {
+    m_dirPathLabel->setText(m_currentDir.isEmpty() ? tr("No directory yet") : "└─ " + m_currentDir);
+
     m_dirView->clear();
     if (m_currentDir.isEmpty()) {
         auto *item = new QListWidgetItem(tr("Save the document to see its directory."));

@@ -22,8 +22,10 @@ void ToggleSwitch::paintEvent(QPaintEvent *)
     const QRectF track(0, 0, width(), height());
     const qreal r = track.height() / 2.0;
 
+    // Mono-tone track (the app's existing blue-gray accent, not a
+    // stoplight-style green/red) — same color in both light and dark mode.
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor("#3fb46f"));
+    p.setBrush(QColor("#879fbd"));
     p.drawRoundedRect(track, r, r);
 
     const qreal knobDiameter = track.height() - 4;

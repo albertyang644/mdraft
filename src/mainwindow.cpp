@@ -26,6 +26,7 @@
 #include <QTimer>
 #include <QTabWidget>
 #include <QTabBar>
+#include <QCloseEvent>
 #include <cmath>
 
 #ifdef MDRAFT_HAVE_WEBENGINE
@@ -119,6 +120,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_topFileLabel(nullptr)
     , m_alwaysOpenPreviewAction(nullptr)
     , m_previewDebounce(nullptr)
+    , m_autosaveDebounce(nullptr)
     , m_darkMode(false)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
@@ -217,6 +219,15 @@ MainWindow::MainWindow(QWidget *parent)
     m_previewDebounce->setInterval(250);
     connect(m_previewDebounce, &QTimer::timeout, this, &MainWindow::updatePreview);
 
+    // Autosave: a couple of seconds after typing stops, silently save
+    // whichever tab was being edited (only if it already has a path).
+    m_autosaveDebounce = new QTimer(this);
+    m_autosaveDebounce->setSingleShot(true);
+    m_autosaveDebounce->setInterval(2000);
+    connect(m_autosaveDebounce, &QTimer::timeout, this, [this]() {
+        flushAutosave(m_autosaveTarget);
+    });
+
     createMenus();
     createStatusBar();
 
@@ -249,6 +260,7 @@ MainWindow::MainWindow(QWidget *parent)
         "## Features\n\n- Three-panel layout\n- Native outline\n- Live stats\n"
         "- Light/dark toggle\n\n```cpp\nint main(){return 0;}\n```\n"
     ));
+    m_editor->document()->setModified(false); // seed content isn't a user edit
     syncActiveTabUi();
     statusBar()->showMessage(tr("Ready"), 2000);
 }
@@ -276,12 +288,7 @@ void MainWindow::setCurrentFile(const QString &path)
     if (m_fileLabel)
         m_fileLabel->setText(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
     m_leftPanel->setCurrentFilePath(path);
-
-    const int idx = m_editorTabs->indexOf(m_editor);
-    if (idx >= 0) {
-        m_editorTabs->setTabText(idx, shown);
-        m_editorTabs->setTabToolTip(idx, path);
-    }
+    updateTabModifiedIndicator(m_editor);
 }
 
 // ---------------------------------------------------------------------------
@@ -302,10 +309,18 @@ MarkdownEditor *MainWindow::createEditorTab(const QString &path, const QString &
 {
     auto *editor = new MarkdownEditor();
     editor->setPlainText(content);
+    editor->document()->setModified(false); // loading content isn't a user edit
     setFilePathOfEditor(editor, path);
 
-    // Only the active tab's edits should drive stats/outline/preview.
+    // Only the active tab's edits should drive stats/outline/preview, but
+    // the modified indicator and autosave scheduling apply to whichever tab
+    // was actually typed in, active or not.
     connect(editor, &MarkdownEditor::contentChanged, this, [this, editor]() {
+        updateTabModifiedIndicator(editor);
+        if (editor->document()->isModified() && !filePathOfEditor(editor).isEmpty()) {
+            m_autosaveTarget = editor;
+            m_autosaveDebounce->start();
+        }
         if (editor != m_editor)
             return;
         updateStats();
@@ -324,14 +339,35 @@ void MainWindow::onTabChanged(int index)
 {
     if (index < 0)
         return;
+    MarkdownEditor *previous = m_editor;
     m_editor = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(index));
     if (!m_editor)
         return;
+    // Flush the tab you're leaving rather than letting it sit dirty on disk
+    // until its own autosave timer happens to fire.
+    if (previous && previous != m_editor)
+        flushAutosave(previous);
     syncActiveTabUi();
 }
 
 void MainWindow::onTabCloseRequested(int index)
 {
+    auto *ed = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(index));
+    if (ed) {
+        if (!filePathOfEditor(ed).isEmpty()) {
+            flushAutosave(ed);
+        } else if (ed->document()->isModified() && !ed->toPlainText().isEmpty()) {
+            // Untitled documents have nowhere to autosave to; this is the
+            // only case where closing can actually lose work.
+            const auto r = QMessageBox::question(this, tr("Close Tab"),
+                tr("This untitled document has unsaved changes and can't be "
+                   "autosaved. Close it anyway?"),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (r != QMessageBox::Yes)
+                return;
+        }
+    }
+
     QWidget *w = m_editorTabs->widget(index);
     m_editorTabs->removeTab(index);
     delete w;
@@ -339,6 +375,61 @@ void MainWindow::onTabCloseRequested(int index)
     // Always keep at least one tab open.
     if (m_editorTabs->count() == 0)
         createEditorTab(QString(), QString());
+}
+
+void MainWindow::updateTabModifiedIndicator(MarkdownEditor *ed)
+{
+    const int idx = m_editorTabs->indexOf(ed);
+    if (idx < 0)
+        return;
+    const QString path = filePathOfEditor(ed);
+    QString shown = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
+    if (ed->document()->isModified())
+        shown += " *";
+    m_editorTabs->setTabText(idx, shown);
+    m_editorTabs->setTabToolTip(idx, path);
+}
+
+void MainWindow::flushAutosave(MarkdownEditor *ed)
+{
+    if (!ed || !ed->document()->isModified())
+        return;
+    const QString path = filePathOfEditor(ed);
+    if (path.isEmpty())
+        return;
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
+        return; // silent: autosave shouldn't interrupt with a dialog
+    QTextStream out(&f);
+    out << ed->toPlainText();
+    ed->document()->setModified(false);
+    updateTabModifiedIndicator(ed);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    int untitledDirty = 0;
+    for (int i = 0; i < m_editorTabs->count(); ++i) {
+        auto *ed = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(i));
+        if (!ed)
+            continue;
+        if (!filePathOfEditor(ed).isEmpty())
+            flushAutosave(ed); // has a path: just save it, no need to ask
+        else if (ed->document()->isModified() && !ed->toPlainText().isEmpty())
+            ++untitledDirty; // nowhere to autosave to: this is the real risk
+    }
+
+    if (untitledDirty > 0) {
+        const auto r = QMessageBox::question(this, tr("Quit"),
+            tr("%1 untitled document(s) have unsaved changes and can't be "
+               "autosaved. Quit anyway?").arg(untitledDirty),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (r != QMessageBox::Yes) {
+            event->ignore();
+            return;
+        }
+    }
+    event->accept();
 }
 
 void MainWindow::syncActiveTabUi()
@@ -374,6 +465,7 @@ void MainWindow::openFileAt(const QString &path, const QString &content)
     if (m_editorTabs->count() == 1 && filePathOfEditor(m_editor).isEmpty()
         && m_editor->toPlainText().isEmpty()) {
         m_editor->setPlainText(content);
+        m_editor->document()->setModified(false); // loading content isn't a user edit
         setCurrentFile(path);
     } else {
         m_editor = createEditorTab(path, content);
@@ -617,6 +709,8 @@ void MainWindow::saveToPath(const QString &path)
     QTextStream out(&f);
     out << m_editor->toPlainText();
     f.close();
+    m_editor->document()->setModified(false);
+    updateTabModifiedIndicator(m_editor);
     statusBar()->showMessage(tr("Saved %1").arg(path), 2000);
 }
 
