@@ -12,6 +12,9 @@ struct OutlineEntry {
     int blockNumber;           // 0-based paragraph/block index in the editor
 };
 
+// Headings are nested by level (an H2 nests under the nearest preceding H1,
+// an H3 under the nearest preceding H2 or H1, etc.), so the outline reads
+// like Ghostwriter's — indented by document structure, not a flat list.
 class OutlineModel : public QAbstractItemModel
 {
     Q_OBJECT
@@ -21,17 +24,20 @@ public:
     // Rebuild the outline from raw markdown source text.
     void setMarkdown(const QString &markdown);
 
-    // Model interface (flat list of headings).
     QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const override;
     QModelIndex parent(const QModelIndex &child) const override;
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     int columnCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
 
-    int blockNumberAt(int row) const;
+    int blockNumberForIndex(const QModelIndex &index) const;
 
 private:
     QVector<OutlineEntry> m_entries;
+    QVector<int> m_parentOf;          // entry index -> parent entry index, -1 for root
+    QVector<QVector<int>> m_children; // entry index -> child entry indices
+    QVector<int> m_rootChildren;      // top-level entry indices
+    QVector<int> m_rowInParent;       // entry index -> row among its siblings
 };
 
 #endif // OUTLINE_MODEL_H

@@ -9,6 +9,8 @@ class OutlineView : public QTreeView
 public:
     explicit OutlineView(QWidget *parent = nullptr);
 
+    void setModel(QAbstractItemModel *model) override;
+
 signals:
     void goToBlock(int blockNumber);
 };

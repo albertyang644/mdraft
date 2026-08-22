@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QFileInfo>
+#include <QIcon>
 #include "mainwindow.h"
 
 #ifdef MDRAFT_HAVE_WEBENGINE
@@ -21,6 +22,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("mdraft");
     QCoreApplication::setOrganizationName("mdraft");
     QCoreApplication::setApplicationVersion("0.1.0");
+    app.setWindowIcon(QIcon(":/icons/mdraft.png"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription("mdraft - a fast native Markdown editor");
@@ -28,20 +30,26 @@ int main(int argc, char *argv[])
     QCommandLineOption fileOpt(QStringList() << "f" << "file",
                                "Open the given Markdown file.", "file");
     parser.addOption(fileOpt);
+    parser.addPositionalArgument("file", "Markdown file to open (e.g. from a file manager's \"Open with\").", "[file]");
     parser.process(app);
+
+    // File managers invoke "Open with" as `mdraft /path/to/file.md` (a bare
+    // positional argument, per the desktop entry's %F), not via -f/--file.
+    QString filePath;
+    if (parser.isSet(fileOpt))
+        filePath = parser.value(fileOpt);
+    else if (!parser.positionalArguments().isEmpty())
+        filePath = parser.positionalArguments().first();
 
     MainWindow w;
     w.show();
 
-    // Optionally open a file passed on the command line.
-    if (parser.isSet(fileOpt)) {
-        QMetaObject::invokeMethod(&w, [&w, path = parser.value(fileOpt)]() {
-            QFile f(path);
-            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                QTextStream in(&f);
-                w.openFileAt(path, in.readAll());
-            }
-        }, Qt::QueuedConnection);
+    if (!filePath.isEmpty()) {
+        QFile f(filePath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in(&f);
+            w.openFileAt(filePath, in.readAll());
+        }
     }
 
     return app.exec();

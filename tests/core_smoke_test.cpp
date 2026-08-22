@@ -25,17 +25,28 @@ void CoreSmokeTest::outlineParsesHeadings()
                        "# Another\n");
     model.setMarkdown(md);
 
-    QCOMPARE(model.rowCount(), 4);
-    QCOMPARE(model.data(model.index(0, 0), Qt::DisplayRole).toString(), QString("Title"));
-    QCOMPARE(model.data(model.index(1, 0), Qt::DisplayRole).toString(), QString("Sub A"));
-    QCOMPARE(model.data(model.index(2, 0), Qt::DisplayRole).toString(), QString("Sub Sub"));
-    QCOMPARE(model.data(model.index(3, 0), Qt::DisplayRole).toString(), QString("Another"));
+    // Headings nest by level: Title > Sub A > Sub Sub, with Another as a
+    // second top-level heading (see OutlineModel's tree-building rule).
+    QCOMPARE(model.rowCount(), 2); // two top-level headings: Title, Another
 
-    // Block numbers map to source lines.
-    QCOMPARE(model.blockNumberAt(0), 0);
-    QCOMPARE(model.blockNumberAt(1), 2);
-    QCOMPARE(model.blockNumberAt(2), 3);
-    QCOMPARE(model.blockNumberAt(3), 5);
+    QModelIndex title = model.index(0, 0);
+    QModelIndex another = model.index(1, 0);
+    QCOMPARE(model.data(title, Qt::DisplayRole).toString(), QString("Title"));
+    QCOMPARE(model.data(another, Qt::DisplayRole).toString(), QString("Another"));
+    QCOMPARE(model.blockNumberForIndex(title), 0);
+    QCOMPARE(model.blockNumberForIndex(another), 5);
+    QCOMPARE(model.rowCount(another), 0);
+
+    QCOMPARE(model.rowCount(title), 1);
+    QModelIndex subA = model.index(0, 0, title);
+    QCOMPARE(model.data(subA, Qt::DisplayRole).toString(), QString("Sub A"));
+    QCOMPARE(model.blockNumberForIndex(subA), 2);
+
+    QCOMPARE(model.rowCount(subA), 1);
+    QModelIndex subSub = model.index(0, 0, subA);
+    QCOMPARE(model.data(subSub, Qt::DisplayRole).toString(), QString("Sub Sub"));
+    QCOMPARE(model.blockNumberForIndex(subSub), 3);
+    QCOMPARE(model.rowCount(subSub), 0);
 }
 
 void CoreSmokeTest::editorStatsSignalDebounced()

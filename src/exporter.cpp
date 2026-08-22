@@ -1,6 +1,9 @@
 #include "exporter.h"
+#include "markdown_html.h"
 
 #include <QProcess>
+#include <QFile>
+#include <QTextStream>
 
 QString Exporter::runProcess(const QString &program, const QStringList &args, bool *ok, QString *err)
 {
@@ -36,10 +39,21 @@ bool Exporter::exportTo(const QString &srcPath, const QString &dstPath, const QS
     args << srcPath << "-o" << dstPath;
 
     if (format == "html") {
-        // GFM-aware: use gfm input format
-        args.prepend("--from=gfm");
-        runProcess("pandoc", args, &ok, &error);
-        return ok;
+        // Convert to a bare HTML fragment ourselves, then wrap it with the
+        // same CSS the live preview uses, so the exported file isn't just
+        // unstyled pandoc paragraphs dumped in a browser.
+        const QString body = runProcess("pandoc", {"--from=gfm", "--to=html", srcPath}, &ok, &error);
+        if (!ok)
+            return false;
+
+        QFile f(dstPath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            error = QString("Cannot write:\n%1").arg(dstPath);
+            return false;
+        }
+        QTextStream out(&f);
+        out << wrapMarkdownHtml(body, /*dark=*/false);
+        return true;
     } else if (format == "pdf") {
         // Let pandoc pick a LaTeX engine (or try pdflatex).
         args.prepend("--pdf-engine=pdflatex");

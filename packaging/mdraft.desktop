@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=mdraft
+GenericName=Markdown Editor
+Comment=A fast, native Markdown reader/writer for Linux
+Exec=@BINDIR@/mdraft %F
+Icon=mdraft
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/markdown;text/x-markdown;text/plain;
+Keywords=markdown;editor;text;md;
+StartupNotify=true
+StartupWMClass=mdraft

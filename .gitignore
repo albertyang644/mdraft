@@ -1,0 +1,8 @@
+build/
+tests/build/
+*.o
+*.moc
+moc_*.cpp
+
+# Scratch verification screenshots from dev sessions, not project deliverables.
+success/

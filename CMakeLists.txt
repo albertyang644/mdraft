@@ -37,8 +37,17 @@ add_executable(mdraft
     src/outline_view.h
     src/exporter.cpp
     src/exporter.h
+    src/markdown_html.cpp
+    src/markdown_html.h
     src/preview_widget.cpp
     src/preview_widget.h
+    src/shutter_panel.cpp
+    src/shutter_panel.h
+    src/left_panel.cpp
+    src/left_panel.h
+    src/toggle_switch.cpp
+    src/toggle_switch.h
+    resources.qrc
 )
 
 target_compile_definitions(mdraft PRIVATE
