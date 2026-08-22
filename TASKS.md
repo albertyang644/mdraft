@@ -4,31 +4,31 @@
 - [x] Decide compiled desktop app as the performance baseline.
 - [x] Decide load-on-open-only semantics for the rendered WebView preview.
 - [x] Record hard WebView startup contract.
-- [ ] Choose Qt major version and required modules.
-- [ ] Choose Markdown parser/renderer for GitHub Flavored Markdown.
-- [ ] Create C++/Qt project skeleton.
-- [ ] Create main application window.
-- [ ] Add three-panel layout.
-- [ ] Add hide/show behavior for left index panel.
-- [ ] Add hide/show behavior for right preview panel.
-- [ ] Implement native left outline/index panel.
-- [ ] Implement central Markdown editor.
-- [ ] Add bottom status area.
-- [ ] Add live word count.
-- [ ] Add live character count.
-- [ ] Add font family control.
-- [ ] Add font size control.
-- [ ] Add light/dark mode toggle.
-- [ ] Add Ghostwriter-inspired menu structure.
-- [ ] Implement lazy preview creation when right panel opens.
-- [ ] Implement preview destruction when right panel closes.
-- [ ] Verify no WebView is created on initial launch.
-- [ ] Debounce rendered preview updates.
-- [ ] Debounce or safely background outline/statistics updates.
-- [ ] Add HTML export engine.
-- [ ] Add PDF export engine.
-- [ ] Add LaTeX/Pandoc-compatible export path where available.
-- [ ] Ensure export engine detection does not block initial editor startup.
-- [ ] Add startup/performance tests or checks.
-- [ ] Add editor responsiveness tests or checks.
-- [ ] Add documentation after success criteria are met.
+- [x] Choose Qt major version and required modules. — Qt6 (Widgets, Gui, Core; optional WebEngineWidgets)
+- [x] Choose Markdown parser/renderer for GitHub Flavored Markdown. — pandoc (`--from=gfm`), shelled out on demand
+- [x] Create C++/Qt project skeleton.
+- [x] Create main application window.
+- [x] Add three-panel layout.
+- [x] Add hide/show behavior for left index panel. — full collapse, not just a thin bar
+- [x] Add hide/show behavior for right preview panel.
+- [x] Implement native left outline/index panel. — nested tree matching heading structure, plus a DIR view of sibling .md files
+- [x] Implement central Markdown editor. — now a tabbed multi-document editor
+- [x] Add bottom status area. — word/char counts, open file's directory, light/dark switch
+- [x] Add live word count.
+- [x] Add live character count.
+- [x] Add font family control.
+- [x] Add font size control.
+- [x] Add light/dark mode toggle. — persists across restarts
+- [x] Add Ghostwriter-inspired menu structure.
+- [x] Implement lazy preview creation when right panel opens.
+- [x] Implement preview destruction when right panel closes.
+- [x] Verify no WebView is created on initial launch. — covered by `preview_lifecycle_test.cpp`
+- [x] Debounce rendered preview updates. — 250ms debounce before shelling out to pandoc
+- [x] Debounce or safely background outline/statistics updates. — editor's own contentChanged is debounced 180ms at the source
+- [x] Add HTML export engine. — standalone styled document, shares CSS with the live preview
+- [x] Add PDF export engine.
+- [x] Add LaTeX/Pandoc-compatible export path where available.
+- [x] Ensure export engine detection does not block initial editor startup. — pandoc/pdflatex are only invoked on demand, never probed at startup
+- [ ] Add startup/performance tests or checks. — structural HARD_CONTRACT is covered by tests; no timing/perf benchmark yet
+- [x] Add editor responsiveness tests or checks. — `editorStatsSignalDebounced` in `core_smoke_test.cpp`
+- [ ] Add documentation after success criteria are met. — no README/docs/ yet

@@ -233,6 +233,11 @@ MainWindow::MainWindow(QWidget *parent)
     if (alwaysOpenPreview)
         m_rightShutter->setOpen(true);
 
+    // Light/Dark remembers whichever side was last picked, same as the
+    // Outline/DIR toggle.
+    if (settings.value("darkMode", false).toBool())
+        toggleDarkMode();
+
     // Keyboard toggles for the panels are the Ctrl+1 / Ctrl+3 shortcuts
     // already attached to the View menu actions above.
 
@@ -268,6 +273,8 @@ void MainWindow::setCurrentFile(const QString &path)
     setWindowTitle(QString("%1 — mdraft").arg(shown));
     if (m_topFileLabel)
         m_topFileLabel->setText(shown);
+    if (m_fileLabel)
+        m_fileLabel->setText(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
     m_leftPanel->setCurrentFilePath(path);
 
     const int idx = m_editorTabs->indexOf(m_editor);
@@ -341,6 +348,8 @@ void MainWindow::syncActiveTabUi()
     setWindowTitle(QString("%1 — mdraft").arg(shown));
     if (m_topFileLabel)
         m_topFileLabel->setText(shown);
+    if (m_fileLabel)
+        m_fileLabel->setText(m_currentFile.isEmpty() ? QString() : QFileInfo(m_currentFile).absolutePath());
     m_leftPanel->setCurrentFilePath(m_currentFile);
 
     updateStats();
@@ -491,7 +500,8 @@ void MainWindow::createStatusBar()
 {
     m_wordLabel = new QLabel(this);
     m_charLabel = new QLabel(this);
-    m_fileLabel = new QLabel(this);
+    m_fileLabel = new QLabel(this); // shows the open file's directory, far left
+    m_fileLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
     // Light/Dark switch: sun | slider | moon, far right of the status bar.
     QWidget *modeWidget = new QWidget(this);
@@ -695,6 +705,7 @@ void MainWindow::toggleRightPanel()
 void MainWindow::toggleDarkMode()
 {
     m_darkMode = !m_darkMode;
+    QSettings().setValue("darkMode", m_darkMode);
     if (m_darkMode) {
         setStyleSheet(
             "QWidget { background-color:#2b2b2b; color:#e0e0e0; }"
