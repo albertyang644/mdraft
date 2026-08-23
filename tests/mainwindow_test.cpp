@@ -3,9 +3,12 @@
 #include "mainwindow.h"
 #include "editor.h"
 #include "preview_widget.h"
+#include "theme.h"
+#include "toggle_switch.h"
 
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLabel>
 #include <QSettings>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -24,6 +27,7 @@ private slots:
     void startupNeverCreatesWebView();
     void canonicalPathsReuseTab();
     void failedSaveDoesNotAdoptPath();
+    void themeControlIsMonochrome();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -92,6 +96,23 @@ void MainWindowTest::failedSaveDoesNotAdoptPath()
                                      false, false));
     QVERIFY(window.filePathOfEditor(window.m_editor).isEmpty());
     QVERIFY(window.m_editor->document()->isModified());
+}
+
+void MainWindowTest::themeControlIsMonochrome()
+{
+    MainWindow window;
+
+    const auto verifyColor = [&window](const QColor &expected) {
+        QCOMPARE(window.m_modeToggle->foregroundColor(), expected);
+        QCOMPARE(window.m_wordLabel->palette().color(QPalette::WindowText), expected);
+        QCOMPARE(window.m_sunLabel->pixmap(Qt::ReturnByValue).toImage().pixelColor(7, 7), expected);
+        QCOMPARE(window.m_moonLabel->pixmap(Qt::ReturnByValue).toImage().pixelColor(3, 7), expected);
+    };
+
+    window.applyDarkMode(false, false);
+    verifyColor(QColor(Theme::LightText));
+    window.applyDarkMode(true, false);
+    verifyColor(QColor(Theme::DarkText));
 }
 
 QTEST_MAIN(MainWindowTest)

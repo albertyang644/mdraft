@@ -1,12 +1,10 @@
 #include "toggle_switch.h"
-#include "theme.h"
 
 #include <QPainter>
-#include <QStyle>
-#include <QStyleOptionFocusRect>
 
 ToggleSwitch::ToggleSwitch(QWidget *parent)
     : QAbstractButton(parent)
+    , m_foregroundColor(palette().color(QPalette::WindowText))
 {
     setCheckable(true);
     setCursor(Qt::PointingHandCursor);
@@ -19,29 +17,42 @@ QSize ToggleSwitch::sizeHint() const
     return QSize(38, 20);
 }
 
+void ToggleSwitch::setForegroundColor(const QColor &color)
+{
+    if (m_foregroundColor == color)
+        return;
+    m_foregroundColor = color;
+    update();
+}
+
+QColor ToggleSwitch::foregroundColor() const
+{
+    return m_foregroundColor;
+}
+
 void ToggleSwitch::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    const QRectF track(0, 0, width(), height());
+    const QRectF track(0.75, 0.75, width() - 1.5, height() - 1.5);
     const qreal r = track.height() / 2.0;
 
-    // Mono-tone track (the app's existing blue-gray accent, not a
-    // stoplight-style green/red) — same color in both light and dark mode.
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(Theme::Accent));
+    p.setPen(QPen(m_foregroundColor, 1.5));
+    p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(track, r, r);
 
-    const qreal knobDiameter = track.height() - 4;
-    const qreal knobX = isChecked() ? track.width() - knobDiameter - 2 : 2;
-    p.setBrush(Qt::white);
-    p.drawEllipse(QRectF(knobX, 2, knobDiameter, knobDiameter));
+    const qreal knobDiameter = height() - 6;
+    const qreal knobX = isChecked() ? width() - knobDiameter - 3 : 3;
+    p.setPen(Qt::NoPen);
+    p.setBrush(m_foregroundColor);
+    p.drawEllipse(QRectF(knobX, 3, knobDiameter, knobDiameter));
 
     if (hasFocus()) {
-        QStyleOptionFocusRect option;
-        option.initFrom(this);
-        option.rect = rect().adjusted(1, 1, -1, -1);
-        style()->drawPrimitive(QStyle::PE_FrameFocusRect, &option, &p, this);
+        QPen focusPen(m_foregroundColor, 1);
+        focusPen.setStyle(Qt::DotLine);
+        p.setPen(focusPen);
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), r, r);
     }
 }

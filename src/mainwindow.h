@@ -62,6 +62,7 @@ private:
     void createMenus();
     void createTopBar();
     void applyTopBarTheme();
+    void applyStatusBarTheme();
     void applyDarkMode(bool dark, bool persist);
     void createStatusBar();
     void refreshOutline();
@@ -109,6 +110,8 @@ private:
     QLabel *m_wordLabel;
     QLabel *m_charLabel;
     QLabel *m_fileLabel;
+    QLabel *m_sunLabel;
+    QLabel *m_moonLabel;
     ToggleSwitch *m_modeToggle;
 
     QWidget *m_topBar;

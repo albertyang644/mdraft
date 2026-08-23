@@ -64,17 +64,17 @@ QIcon makeShutterIcon(bool paneOnLeft)
     return QIcon(pm);
 }
 
-QIcon makeSunIcon()
+QIcon makeSunIcon(const QColor &color)
 {
     QPixmap pm(14, 14);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
     const QPointF c(7, 7);
-    p.setBrush(QColor(Theme::Sun));
+    p.setBrush(color);
     p.setPen(Qt::NoPen);
     p.drawEllipse(c, 3.2, 3.2);
-    p.setPen(QPen(QColor(Theme::Sun), 1.2));
+    p.setPen(QPen(color, 1.2));
     for (int i = 0; i < 8; ++i) {
         const qreal angle = i * M_PI / 4.0;
         const QPointF dir(std::cos(angle), std::sin(angle));
@@ -84,13 +84,13 @@ QIcon makeSunIcon()
     return QIcon(pm);
 }
 
-QIcon makeMoonIcon()
+QIcon makeMoonIcon(const QColor &color)
 {
     QPixmap pm(14, 14);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setBrush(QColor(Theme::Moon));
+    p.setBrush(color);
     p.setPen(Qt::NoPen);
     p.drawEllipse(QRectF(2, 2, 10, 10));
     p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
@@ -114,6 +114,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_wordLabel(nullptr)
     , m_charLabel(nullptr)
     , m_fileLabel(nullptr)
+    , m_sunLabel(nullptr)
+    , m_moonLabel(nullptr)
     , m_modeToggle(nullptr)
     , m_topBar(nullptr)
     , m_leftToggleBtn(nullptr)
@@ -615,10 +617,8 @@ void MainWindow::createStatusBar()
     modeLayout->setContentsMargins(8, 0, 4, 0);
     modeLayout->setSpacing(6);
 
-    QLabel *sunLabel = new QLabel(modeWidget);
-    sunLabel->setPixmap(makeSunIcon().pixmap(14, 14));
-    QLabel *moonLabel = new QLabel(modeWidget);
-    moonLabel->setPixmap(makeMoonIcon().pixmap(14, 14));
+    m_sunLabel = new QLabel(modeWidget);
+    m_moonLabel = new QLabel(modeWidget);
 
     m_modeToggle = new ToggleSwitch(modeWidget);
     m_modeToggle->setChecked(false);
@@ -628,16 +628,29 @@ void MainWindow::createStatusBar()
             toggleDarkMode();
     });
 
-    modeLayout->addWidget(sunLabel);
+    modeLayout->addWidget(m_sunLabel);
     modeLayout->addWidget(m_modeToggle);
-    modeLayout->addWidget(moonLabel);
+    modeLayout->addWidget(m_moonLabel);
 
     statusBar()->addWidget(m_fileLabel, 1);
     statusBar()->addPermanentWidget(m_wordLabel);
     statusBar()->addPermanentWidget(m_charLabel);
     statusBar()->addPermanentWidget(modeWidget); // far right
+    applyStatusBarTheme();
     // Word/char counts are populated once the first tab exists (see
     // syncActiveTabUi(), called from createEditorTab() right after this).
+}
+
+void MainWindow::applyStatusBarTheme()
+{
+    const QColor foreground(m_darkMode ? Theme::DarkText : Theme::LightText);
+    const QString labelStyle = QStringLiteral("color:%1;").arg(foreground.name());
+    m_fileLabel->setStyleSheet(labelStyle);
+    m_wordLabel->setStyleSheet(labelStyle);
+    m_charLabel->setStyleSheet(labelStyle);
+    m_sunLabel->setPixmap(makeSunIcon(foreground).pixmap(14, 14));
+    m_moonLabel->setPixmap(makeMoonIcon(foreground).pixmap(14, 14));
+    m_modeToggle->setForegroundColor(foreground);
 }
 
 // ---------------------------------------------------------------------------
@@ -858,6 +871,7 @@ void MainWindow::applyDarkMode(bool dark, bool persist)
             editor->setDarkMode(m_darkMode);
     }
     applyTopBarTheme();
+    applyStatusBarTheme();
 }
 
 // ---------------------------------------------------------------------------
