@@ -13,7 +13,11 @@
   - **DIR** page: a `QListWidget` of sibling `.md` files in the open
     document's directory (built with `QDir`, no shelling out). Clicking an
     entry emits `fileActivated(path)`, which `MainWindow` turns into
-    "open this file in a tab" via `openFileAt()`.
+    "open this file in a tab" via `openFileAt()`. The listing follows a
+    `QFileSystemWatcher` on the directory, plus an explicit refresh button
+    shown only in DIR mode — the watcher silently reports nothing on
+    network mounts and once the inotify watch limit is exhausted, so the
+    manual path has to exist.
 - **Middle** — a `QTabWidget`; each tab is one `MarkdownEditor`
   (`QPlainTextEdit` + `MarkdownHighlighter`). A guarded active-editor pointer
   points at the active tab's editor, so the rest of the class (menus, file
@@ -76,6 +80,32 @@ Each tab has `DocumentFile` state. Saves use `QSaveFile` temp-and-commit
 replacement, retain a fingerprint of the last known disk contents, and refuse
 to overwrite external changes. A failed save keeps the tab dirty and prevents
 tab/application close.
+
+## External changes (Notepad++ semantics)
+
+Open documents are watched with a `QFileSystemWatcher`. When one changes
+underneath you, `MainWindow::promptReload()` asks whether to reload it:
+
+- **Yes** reloads from disk and restores your caret line, so a reload does
+  not also lose your place.
+- **No** keeps your buffer, marks it modified, and calls
+  `DocumentFile::acceptDiskState()` to re-baseline the fingerprint.
+
+That re-baseline is load-bearing, not a detail. The external-change check
+refuses saves while a conflict stands, and every close path routes through a
+save — so without a way to resolve the conflict, a dirty-and-conflicted
+document could not be saved, its tab could not be closed, and the application
+could not be quit. Declining the reload is the escape hatch; `F5` /
+**File → Reload from Disk** is the other direction.
+
+Two details the watcher forces:
+
+- Our own saves must not look like external edits. `QSaveFile` commits by
+  rename, which both fires the watcher and drops the inotify watch, so every
+  successful save re-baselines the fingerprint and re-arms the watch. A
+  notification whose fingerprint still matches is ours and is ignored.
+- Re-opening an already-open file (clicking it again in DIR) re-reads it
+  rather than silently reusing a stale buffer.
 
 ## Dark mode
 

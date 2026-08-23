@@ -31,6 +31,32 @@ QIcon makeOutlineIcon(bool dark)
     p.end();
     return QIcon(pm);
 }
+
+// Circular-arrow "refresh" glyph: a nearly closed arc with a head on the end.
+QIcon makeRefreshIcon(bool dark)
+{
+    QPixmap pm(14, 14);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QColor stroke(dark ? Theme::OutlineDark : Theme::OutlineLight);
+    p.setPen(QPen(stroke, 1.5, Qt::SolidLine, Qt::RoundCap));
+    p.setBrush(Qt::NoBrush);
+
+    // Leave a gap at the top-right for the arrow head.
+    const QRectF arc(2.5, 2.5, 9.0, 9.0);
+    p.drawArc(arc, 60 * 16, 300 * 16);
+
+    // Arrow head at the open end of the arc.
+    const QPointF tip(9.9, 2.4);
+    p.setBrush(stroke);
+    p.setPen(Qt::NoPen);
+    QPolygonF head;
+    head << tip << QPointF(tip.x() - 3.6, tip.y() + 0.9) << QPointF(tip.x() - 0.7, tip.y() + 3.6);
+    p.drawPolygon(head);
+    p.end();
+    return QIcon(pm);
+}
 }
 
 LeftPanel::LeftPanel(QWidget *parent)
@@ -58,6 +84,17 @@ LeftPanel::LeftPanel(QWidget *parent)
     m_outlineBtn->setToolTip(tr("Show the document outline"));
     m_dirBtn->setToolTip(tr("Show Markdown files in this document's directory"));
 
+    // The listing auto-updates via QFileSystemWatcher, but that silently does
+    // nothing on network mounts and when the inotify watch limit is exhausted,
+    // so keep a manual refresh available too.
+    m_dirRefreshBtn = new QPushButton(m_toggleBar);
+    m_dirRefreshBtn->setFlat(true);
+    m_dirRefreshBtn->setFixedSize(22, 22);
+    m_dirRefreshBtn->setCursor(Qt::PointingHandCursor);
+    m_dirRefreshBtn->setToolTip(tr("Refresh the directory listing"));
+    m_dirRefreshBtn->setVisible(false); // only meaningful in DIR mode
+    connect(m_dirRefreshBtn, &QPushButton::clicked, this, &LeftPanel::refreshDirListing);
+
     auto *group = new QButtonGroup(this);
     group->setExclusive(true);
     group->addButton(m_outlineBtn);
@@ -67,6 +104,8 @@ LeftPanel::LeftPanel(QWidget *parent)
 
     toggleLayout->addWidget(m_outlineBtn);
     toggleLayout->addWidget(m_dirBtn);
+    toggleLayout->addSpacing(4);
+    toggleLayout->addWidget(m_dirRefreshBtn);
     toggleLayout->addStretch(1);
 
     connect(m_outlineBtn, &QPushButton::clicked, this, &LeftPanel::showOutline);
@@ -151,6 +190,14 @@ void LeftPanel::applyToggleBarStyle()
     m_outlineBtn->setStyleSheet(segStyle + "QPushButton{border-top-right-radius:0;border-bottom-right-radius:0;}");
     m_dirBtn->setStyleSheet(segStyle + "QPushButton{border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;}");
     m_outlineBtn->setIcon(makeOutlineIcon(m_dark));
+
+    // Flat, borderless: it sits outside the segmented pair, so it should read
+    // as an action rather than a third segment.
+    m_dirRefreshBtn->setStyleSheet(
+        QString("QPushButton { border:none; background:transparent; }"
+                "QPushButton:hover { background:%1; border-radius:3px; }")
+            .arg(m_dark ? Theme::DarkWidget : Theme::LightPanelAlt));
+    m_dirRefreshBtn->setIcon(makeRefreshIcon(m_dark));
 }
 
 void LeftPanel::applyDirHeaderStyle()
@@ -178,6 +225,7 @@ void LeftPanel::showOutline()
 {
     m_outlineBtn->setChecked(true);
     m_stack->setCurrentIndex(0);
+    m_dirRefreshBtn->setVisible(false);
     QSettings().setValue("leftPanelDirMode", false);
 }
 
@@ -185,6 +233,7 @@ void LeftPanel::showDirListing()
 {
     m_dirBtn->setChecked(true);
     m_stack->setCurrentIndex(1);
+    m_dirRefreshBtn->setVisible(true);
     QSettings().setValue("leftPanelDirMode", true);
     refreshDirListing();
 }

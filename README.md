@@ -16,7 +16,8 @@ destroyed when closed.
   character counts, formatting actions, and font controls.
 - **Outline and directory navigation** in a native left panel. Jump between
   headings or open sibling `.md` and `.markdown` files without leaving the
-  editor.
+  editor. The directory listing tracks changes on disk and has a refresh
+  button for filesystems where watching does not work.
 - **Preview on demand.** `QWebEngineView` does not exist at startup or while
   the preview is closed. Opening it renders the current buffer through Pandoc.
 - **Defensive preview.** JavaScript is disabled and remote subresources are
@@ -24,6 +25,9 @@ destroyed when closed.
 - **Durable autosave.** Named documents are replaced atomically, external
   changes are detected, and failed writes keep the tab dirty instead of
   silently discarding work.
+- **Edited by someone else?** Open files are watched. When one changes
+  underneath you, mdraft offers to reload it; declining keeps your version and
+  lets your next save overwrite. `F5` reloads on demand.
 - **Asynchronous export** of the current buffer to standalone HTML, PDF, or
   LaTeX. Conversion never blocks the editor UI.
 - **Light and dark themes** with persisted window and theme settings.
@@ -93,6 +97,7 @@ Multiple files open as tabs.
 | New document | `Ctrl+N` |
 | Open | `Ctrl+O` |
 | Save | `Ctrl+S` |
+| Reload current file from disk | `F5` |
 | Toggle outline/DIR panel | `Ctrl+1` |
 | Toggle rendered preview | `Ctrl+3` |
 | Toggle light/dark mode | `Ctrl+D` |

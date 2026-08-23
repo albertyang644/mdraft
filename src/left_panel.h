@@ -49,6 +49,7 @@ private:
     QWidget *m_toggleBar;
     QPushButton *m_outlineBtn;
     QPushButton *m_dirBtn;
+    QPushButton *m_dirRefreshBtn; // manual fallback when the watcher can't see changes
     QStackedWidget *m_stack;
     OutlineView *m_outlineView;
     QListWidget *m_dirView;

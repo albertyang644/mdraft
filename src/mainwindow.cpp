@@ -30,6 +30,7 @@
 #include <QPainter>
 #include <QHBoxLayout>
 #include <QTimer>
+#include <QFileSystemWatcher>
 #include <QTabWidget>
 #include <QTabBar>
 #include <QCloseEvent>
@@ -122,6 +123,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_rightToggleBtn(nullptr)
     , m_topFileLabel(nullptr)
     , m_previewDebounce(nullptr)
+    , m_docWatcher(nullptr)
     , m_darkMode(false)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
@@ -225,6 +227,10 @@ MainWindow::MainWindow(QWidget *parent)
     // Preview conversion shells out to pandoc, so it's debounced separately
     // from the cheap stats/outline refresh to avoid spawning a process per
     // keystroke.
+    m_docWatcher = new QFileSystemWatcher(this);
+    connect(m_docWatcher, &QFileSystemWatcher::fileChanged,
+            this, &MainWindow::onWatchedFileChanged);
+
     m_previewDebounce = new QTimer(this);
     m_previewDebounce->setSingleShot(true);
     m_previewDebounce->setInterval(250);
@@ -276,6 +282,7 @@ void MainWindow::setCurrentFile(const QString &path)
         m_fileLabel->setText(m_currentFile.isEmpty() ? QString() : QFileInfo(m_currentFile).absolutePath());
     m_leftPanel->setCurrentFilePath(m_currentFile);
     updateTabModifiedIndicator(m_editor);
+    watchDocument(m_editor);
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +356,7 @@ MarkdownEditor *MainWindow::createEditorTab(const QString &path, const QString &
     const QString label = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
     const int idx = m_editorTabs->addTab(editor, label);
     m_editorTabs->setTabToolTip(idx, path);
+    watchDocument(editor);
     m_editorTabs->setCurrentIndex(idx); // triggers onTabChanged -> syncActiveTabUi
     return editor;
 }
@@ -389,9 +397,11 @@ void MainWindow::onTabCloseRequested(int index)
         }
     }
 
+    unwatchDocument(ed);
     QWidget *w = m_editorTabs->widget(index);
     m_editorTabs->removeTab(index);
     m_documents.remove(ed);
+    m_reloadPromptOpen.remove(ed);
     delete w;
 
     // Always keep at least one tab open.
@@ -420,6 +430,148 @@ bool MainWindow::flushAutosave(MarkdownEditor *ed, bool reportError)
     if (path.isEmpty())
         return false;
     return saveEditorToPath(ed, path, reportError, true);
+}
+
+void MainWindow::watchDocument(MarkdownEditor *ed)
+{
+    if (!ed)
+        return;
+    const QString path = filePathOfEditor(ed);
+    if (path.isEmpty() || !QFileInfo::exists(path))
+        return;
+    if (!m_docWatcher->files().contains(path))
+        m_docWatcher->addPath(path);
+}
+
+void MainWindow::unwatchDocument(MarkdownEditor *ed)
+{
+    if (!ed)
+        return;
+    const QString path = filePathOfEditor(ed);
+    if (path.isEmpty())
+        return;
+    // Only drop the watch if no other tab still has the same file open.
+    for (int i = 0; i < m_editorTabs->count(); ++i) {
+        auto *other = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(i));
+        if (other && other != ed && filePathOfEditor(other) == path)
+            return;
+    }
+    m_docWatcher->removePath(path);
+}
+
+void MainWindow::onWatchedFileChanged(const QString &path)
+{
+    const QString normalized = DocumentFile::normalizedPath(path);
+    MarkdownEditor *ed = editorForPath(normalized.isEmpty() ? path : normalized);
+    if (!ed)
+        return;
+
+    DocumentFile &document = m_documents[ed];
+
+    if (!document.exists()) {
+        // Deleted or replaced by something we can't read yet. Keep the buffer
+        // and let the next save recreate the file rather than nagging.
+        statusBar()->showMessage(
+            tr("%1 was removed on disk. Your copy is still open here.")
+                .arg(QFileInfo(filePathOfEditor(ed)).fileName()), 8000);
+        updateTabModifiedIndicator(ed);
+        return;
+    }
+
+    // A rename-into-place (QSaveFile, and most editors) drops the inotify
+    // watch, so re-arm it on every notification.
+    watchDocument(ed);
+
+    if (!document.changedOnDisk())
+        return; // our own save, or a no-op touch
+
+    promptReload(ed);
+}
+
+void MainWindow::promptReload(MarkdownEditor *ed)
+{
+    if (!ed || m_reloadPromptOpen.contains(ed))
+        return;
+    m_reloadPromptOpen.insert(ed);
+
+    const QString name = QFileInfo(filePathOfEditor(ed)).fileName();
+    const bool dirty = ed->document()->isModified();
+    const QString question = dirty
+        ? tr("%1 has been modified by another program.\n\n"
+             "Reload it and lose the changes you have made here?").arg(name)
+        : tr("%1 has been modified by another program.\n\nReload it?").arg(name);
+
+    const auto answer = QMessageBox::question(this, tr("File Changed on Disk"), question,
+                                              QMessageBox::Yes | QMessageBox::No,
+                                              dirty ? QMessageBox::No : QMessageBox::Yes);
+    m_reloadPromptOpen.remove(ed);
+
+    if (answer == QMessageBox::Yes) {
+        reloadEditorFromDisk(ed);
+    } else {
+        // Keep this buffer as the authoritative version. Re-baselining is what
+        // stops the external-change check from refusing every future save (and
+        // with it, every attempt to close the tab or quit).
+        m_documents[ed].acceptDiskState();
+        ed->document()->setModified(true);
+        updateTabModifiedIndicator(ed);
+        statusBar()->showMessage(
+            tr("Keeping your version of %1; saving will overwrite the copy on disk.").arg(name),
+            8000);
+    }
+}
+
+bool MainWindow::reloadEditorFromDisk(MarkdownEditor *ed)
+{
+    if (!ed)
+        return false;
+    const QString path = filePathOfEditor(ed);
+    if (path.isEmpty())
+        return false;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("Reload"),
+            tr("Cannot read:\n%1\n\n%2").arg(path, file.errorString()));
+        return false;
+    }
+    QTextStream in(&file);
+    const QString content = in.readAll();
+    file.close();
+
+    // Preserve the caret line so a reload doesn't throw away your place.
+    const int block = ed->textCursor().blockNumber();
+    ed->setPlainText(content);
+    ed->document()->setModified(false);
+    ed->goToLine(qMin(block, ed->document()->blockCount() - 1));
+
+    m_documents[ed].acceptDiskState();
+    watchDocument(ed);
+    updateTabModifiedIndicator(ed);
+    if (ed == m_editor)
+        syncActiveTabUi();
+    statusBar()->showMessage(tr("Reloaded %1").arg(QFileInfo(path).fileName()), 3000);
+    return true;
+}
+
+void MainWindow::reloadFromDisk()
+{
+    if (!m_editor)
+        return;
+    const QString path = filePathOfEditor(m_editor);
+    if (path.isEmpty()) {
+        statusBar()->showMessage(tr("This document has not been saved yet."), 3000);
+        return;
+    }
+    if (m_editor->document()->isModified()) {
+        const auto answer = QMessageBox::question(this, tr("Reload"),
+            tr("Discard your unsaved changes to %1 and reload it from disk?")
+                .arg(QFileInfo(path).fileName()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+    reloadEditorFromDisk(m_editor);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -478,6 +630,15 @@ void MainWindow::openFileAt(const QString &path, const QString &content)
     // Reuse an already-open tab for this file instead of opening a duplicate.
     if (MarkdownEditor *existing = editorForPath(normalized)) {
         m_editorTabs->setCurrentWidget(existing);
+        // Re-opening an already-open file must reflect what is on disk now,
+        // not the buffer we happened to load earlier.
+        if (existing->toPlainText() != content) {
+            if (!existing->document()->isModified()) {
+                reloadEditorFromDisk(existing);
+            } else if (m_documents[existing].changedOnDisk()) {
+                promptReload(existing);
+            }
+        }
         statusBar()->showMessage(tr("Opened %1").arg(normalized), 3000);
         return;
     }
@@ -506,6 +667,8 @@ void MainWindow::createMenus()
     QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addAction(tr("&New"), QKeySequence::New, this, &MainWindow::newFile);
     fileMenu->addAction(tr("&Open…"), QKeySequence::Open, this, &MainWindow::openFile);
+    fileMenu->addAction(tr("&Reload from Disk"), QKeySequence(Qt::Key_F5), this,
+                        &MainWindow::reloadFromDisk);
     fileMenu->addSeparator();
     fileMenu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::saveFile);
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveFileAs);
@@ -780,6 +943,8 @@ bool MainWindow::saveEditorToPath(MarkdownEditor *editor, const QString &path,
 
     editor->document()->setModified(false);
     updateTabModifiedIndicator(editor);
+    // QSaveFile replaces the file by rename, which drops the inotify watch.
+    watchDocument(editor);
     if (editor == m_editor)
         m_currentFile = filePathOfEditor(editor);
     statusBar()->showMessage(tr("Saved %1").arg(filePathOfEditor(editor)), 2000);

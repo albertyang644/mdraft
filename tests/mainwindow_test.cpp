@@ -27,6 +27,8 @@ private slots:
     void startupNeverCreatesWebView();
     void canonicalPathsReuseTab();
     void failedSaveDoesNotAdoptPath();
+    void reloadPullsExternalChanges();
+    void keepingMyVersionUnblocksSavingAndClosing();
     void themeControlIsMonochrome();
 
 private:
@@ -113,6 +115,73 @@ void MainWindowTest::themeControlIsMonochrome()
     verifyColor(QColor(Theme::LightText));
     window.applyDarkMode(true, false);
     verifyColor(QColor(Theme::DarkText));
+}
+
+void MainWindowTest::reloadPullsExternalChanges()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("shared.md");
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("original\n");
+    }
+
+    MainWindow window;
+    window.openFileAt(path, QStringLiteral("original\n"));
+    MarkdownEditor *editor = window.m_editor;
+    QVERIFY(editor);
+
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("their version\n");
+    }
+
+    QVERIFY(window.reloadEditorFromDisk(editor));
+    QCOMPARE(editor->toPlainText(), QStringLiteral("their version\n"));
+    QVERIFY(!editor->document()->isModified());
+}
+
+void MainWindowTest::keepingMyVersionUnblocksSavingAndClosing()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("contested.md");
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("original\n");
+    }
+
+    MainWindow window;
+    window.openFileAt(path, QStringLiteral("original\n"));
+    MarkdownEditor *editor = window.m_editor;
+    QVERIFY(editor);
+
+    // Type into the buffer the way a user would: setPlainText() resets the
+    // document and would clear the modified flag we are trying to set up.
+    QTextCursor cursor(editor->document());
+    cursor.movePosition(QTextCursor::End);
+    cursor.insertText(QStringLiteral("my version\n"));
+    QVERIFY(editor->document()->isModified());
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("their version\n");
+    }
+
+    // Until the conflict is resolved the save is refused, which is what used
+    // to make the tab (and the whole app) impossible to close.
+    QVERIFY(!window.flushAutosave(editor));
+
+    // Choosing "keep mine" re-baselines, so saving and closing work again.
+    window.m_documents[editor].acceptDiskState();
+    QVERIFY(window.flushAutosave(editor));
+
+    window.onTabCloseRequested(window.m_editorTabs->indexOf(editor));
+    QCOMPARE(window.m_editorTabs->count(), 1);
+    QVERIFY(window.m_editor);
+    QVERIFY(window.filePathOfEditor(window.m_editor).isEmpty()); // fresh Untitled tab
 }
 
 QTEST_MAIN(MainWindowTest)

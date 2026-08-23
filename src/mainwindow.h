@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QHash>
 #include <QPointer>
+#include <QSet>
 
 #include "document_file.h"
 
@@ -18,6 +19,7 @@ class OutlineView;
 class PreviewWidget;
 class ShutterPanel;
 class QTimer;
+class QFileSystemWatcher;
 class LeftPanel;
 class ToggleSwitch;
 
@@ -97,6 +99,17 @@ private:
     void updateTabModifiedIndicator(MarkdownEditor *ed);
     bool flushAutosave(MarkdownEditor *ed, bool reportError = false);
 
+    // External-change handling (Notepad++ semantics): open documents are
+    // watched, and when one changes underneath you the editor offers to
+    // reload it. Declining keeps your buffer and re-baselines, so your next
+    // save is allowed to overwrite rather than being refused forever.
+    void watchDocument(MarkdownEditor *ed);
+    void unwatchDocument(MarkdownEditor *ed);
+    void onWatchedFileChanged(const QString &path);
+    void promptReload(MarkdownEditor *ed);
+    bool reloadEditorFromDisk(MarkdownEditor *ed);
+    void reloadFromDisk(); // F5
+
     QSplitter *m_splitter;
     ShutterPanel *m_leftShutter;
     ShutterPanel *m_rightShutter;
@@ -119,6 +132,8 @@ private:
     QPushButton *m_rightToggleBtn;
     QLabel *m_topFileLabel;
     QTimer *m_previewDebounce;
+    QFileSystemWatcher *m_docWatcher;
+    QSet<MarkdownEditor *> m_reloadPromptOpen;
 
     QString m_currentFile;
     bool m_darkMode;

@@ -65,6 +65,21 @@ void DocumentFile::captureDiskSnapshot()
     m_hasDiskSnapshot = ok;
 }
 
+bool DocumentFile::changedOnDisk() const
+{
+    return diskChanged();
+}
+
+void DocumentFile::acceptDiskState()
+{
+    captureDiskSnapshot();
+}
+
+bool DocumentFile::exists() const
+{
+    return !m_path.isEmpty() && QFileInfo::exists(m_path);
+}
+
 bool DocumentFile::diskChanged() const
 {
     if (!m_hasDiskSnapshot || m_path.isEmpty())

@@ -18,7 +18,10 @@ target_link_libraries(document_file_test PRIVATE mdraft_core Qt6::Test)
 add_executable(exporter_test exporter_test.cpp)
 target_link_libraries(exporter_test PRIVATE mdraft_core Qt6::Test)
 
-foreach(test_target core_smoke_test preview_lifecycle_test mainwindow_test document_file_test exporter_test)
+add_executable(left_panel_test left_panel_test.cpp)
+target_link_libraries(left_panel_test PRIVATE mdraft_core Qt6::Test)
+
+foreach(test_target core_smoke_test preview_lifecycle_test mainwindow_test document_file_test exporter_test left_panel_test)
     add_test(NAME ${test_target} COMMAND ${test_target})
     set_tests_properties(${test_target} PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox")
