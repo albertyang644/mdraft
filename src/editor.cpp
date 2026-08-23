@@ -2,12 +2,11 @@
 #include "highlighter.h"
 
 #include <QTextBlock>
-#include <QPainter>
 #include <QTimer>
 #include <QFontDatabase>
 
 MarkdownEditor::MarkdownEditor(QWidget *parent)
-    : QPlainTextEdit(parent), m_changeTimer(nullptr)
+    : QPlainTextEdit(parent), m_changeTimer(nullptr), m_highlighter(nullptr)
 {
     // Monospaced, readable default font
     QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
@@ -17,7 +16,7 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
     setTabStopDistance(fontMetrics().horizontalAdvance(' ') * 4);
 
     // Markdown syntax highlighting (native, cheap)
-    new MarkdownHighlighter(document());
+    m_highlighter = new MarkdownHighlighter(document());
 
     // Debounce the content-changed signal so secondary work
     // never runs on the typing hot path.
@@ -32,6 +31,11 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
 }
 
+void MarkdownEditor::setDarkMode(bool dark)
+{
+    m_highlighter->setDarkMode(dark);
+}
+
 void MarkdownEditor::goToLine(int blockNumber)
 {
     if (blockNumber < 0 || blockNumber >= document()->blockCount())
@@ -41,9 +45,4 @@ void MarkdownEditor::goToLine(int blockNumber)
     setTextCursor(cursor);
     centerCursor();
     setFocus();
-}
-
-void MarkdownEditor::paintEvent(QPaintEvent *e)
-{
-    QPlainTextEdit::paintEvent(e);
 }

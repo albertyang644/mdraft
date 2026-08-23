@@ -2,7 +2,10 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QHash>
 #include <QPointer>
+
+#include "document_file.h"
 
 class QSplitter;
 class QLabel;
@@ -59,12 +62,18 @@ private:
     void createMenus();
     void createTopBar();
     void applyTopBarTheme();
+    void applyDarkMode(bool dark, bool persist);
     void createStatusBar();
     void refreshOutline();
     void updateStats();
     void updatePreview();
+    void updateEditActions();
+    void exportDocument(const QString &format, const QString &title,
+                        const QString &suffix, const QString &filter);
 
-    void saveToPath(const QString &path);
+    bool saveToPath(const QString &path);
+    bool saveEditorToPath(MarkdownEditor *editor, const QString &path,
+                          bool reportError, bool checkExternalChanges);
     void setCurrentFile(const QString &path);
     QString currentMarkdown() const;
 
@@ -78,16 +87,14 @@ private:
     void syncActiveTabUi();
     QString filePathOfEditor(MarkdownEditor *ed) const;
     void setFilePathOfEditor(MarkdownEditor *ed, const QString &path);
+    MarkdownEditor *editorForPath(const QString &path) const;
 
     // Autosave: a few seconds after you stop typing, a tab that already has
     // a file path is saved silently. Tabs with no path (Untitled) can't be
-    // autosaved anywhere, so those are the only ones that ever prompt before
-    // being discarded (tab close / app quit).
+    // autosaved anywhere, so they prompt before being discarded. Named tabs
+    // also refuse to close if their checked save fails.
     void updateTabModifiedIndicator(MarkdownEditor *ed);
-    void flushAutosave(MarkdownEditor *ed);
-
-    QTimer *m_autosaveDebounce;
-    QPointer<MarkdownEditor> m_autosaveTarget;
+    bool flushAutosave(MarkdownEditor *ed, bool reportError = false);
 
     QSplitter *m_splitter;
     ShutterPanel *m_leftShutter;
@@ -95,7 +102,8 @@ private:
     LeftPanel *m_leftPanel;
     OutlineModel *m_outlineModel;
     QTabWidget *m_editorTabs;
-    MarkdownEditor *m_editor; // == active tab's editor
+    QPointer<MarkdownEditor> m_editor; // == active tab's editor
+    QHash<MarkdownEditor *, DocumentFile> m_documents;
     PreviewWidget *m_preview;
 
     QLabel *m_wordLabel;
@@ -107,8 +115,6 @@ private:
     QPushButton *m_leftToggleBtn;
     QPushButton *m_rightToggleBtn;
     QLabel *m_topFileLabel;
-    QAction *m_alwaysOpenPreviewAction;
-
     QTimer *m_previewDebounce;
 
     QString m_currentFile;
@@ -120,6 +126,8 @@ private:
     QAction *m_copyAction;
     QAction *m_pasteAction;
     QAction *m_selectAllAction;
+
+    friend class MainWindowTest;
 };
 
 #endif // MAINWINDOW_H

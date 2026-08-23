@@ -15,7 +15,7 @@
     entry emits `fileActivated(path)`, which `MainWindow` turns into
     "open this file in a tab" via `openFileAt()`.
 - **Middle** — a `QTabWidget`; each tab is one `MarkdownEditor`
-  (`QPlainTextEdit` + `MarkdownHighlighter`). `MainWindow::m_editor` always
+  (`QPlainTextEdit` + `MarkdownHighlighter`). A guarded active-editor pointer
   points at the active tab's editor, so the rest of the class (menus, file
   ops, stats/outline/preview wiring) can keep treating "the editor" as a
   single object.
@@ -43,6 +43,12 @@ content instantly instead of a blank-then-pop-in flash; the WebView itself
 stays hidden until its first `loadFinished`, which avoids a first-paint
 flash/flicker that's otherwise common with WebEngine on X11.
 
+The lazily created WebView uses a dedicated `QWebEngineProfile`. JavaScript
+is disabled, and a profile-level request interceptor permits only local
+`about`, `data`, `file`, and `qrc` URLs. This keeps raw HTML compatible with
+GFM while preventing a document from loading remote subresources when its
+preview opens.
+
 ## Debouncing
 
 Two independent debounce timers exist because they guard different costs:
@@ -53,8 +59,8 @@ Two independent debounce timers exist because they guard different costs:
 - `MainWindow::m_previewDebounce` (250ms) sits between that and the actual
   preview refresh, because refreshing means spawning a `pandoc` process —
   worth debouncing separately from the cheap stuff above it.
-- `MainWindow::m_autosaveDebounce` (2000ms) is separate again: autosave
-  writes to disk, which should happen less eagerly than a preview refresh.
+- Each editor owns a 2000ms autosave timer, so edits in one tab cannot replace
+  another tab's pending save.
 
 ## Autosave
 
@@ -65,6 +71,11 @@ more than a couple of seconds out of sync with disk. A tab with no path
 (Untitled) has nowhere to autosave to; that's the one case that prompts
 before discarding unsaved content (closing the tab or quitting the app).
 The `*` suffix on a tab's label reflects `QTextDocument::isModified()`.
+
+Each tab has `DocumentFile` state. Saves use `QSaveFile` temp-and-commit
+replacement, retain a fingerprint of the last known disk contents, and refuse
+to overwrite external changes. A failed save keeps the tab dirty and prevents
+tab/application close.
 
 ## Dark mode
 
@@ -80,7 +91,8 @@ all, so `PreviewWidget::setDarkMode()` swaps its CSS instead.
 
 ## Export
 
-`Exporter::exportTo()` shells out to `pandoc` for HTML, PDF
-(`--pdf-engine=pdflatex`), and LaTeX. None of these tools are probed at
-startup; detection failures only surface when you actually try to export
-or open the preview, per the performance goals in `GOALS.md`.
+`Exporter::exportMarkdown()` asynchronously streams the current editor buffer
+to `pandoc` for HTML, PDF (`--pdf-engine=pdflatex`), and LaTeX. Every format
+explicitly uses GFM input. None of these tools are probed at startup;
+detection failures only surface when you actually try to export or open the
+preview, per the performance goals in `GOALS.md`.

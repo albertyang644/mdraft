@@ -1,13 +1,11 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QFile>
 #include <QFileInfo>
 #include <QIcon>
+#include <QMessageBox>
+#include <QTextStream>
 #include "mainwindow.h"
-
-#ifdef MDRAFT_HAVE_WEBENGINE
-#include <QWebEngineProfile>
-#include <QWebEngineSettings>
-#endif
 
 int main(int argc, char *argv[])
 {
@@ -30,25 +28,30 @@ int main(int argc, char *argv[])
     QCommandLineOption fileOpt(QStringList() << "f" << "file",
                                "Open the given Markdown file.", "file");
     parser.addOption(fileOpt);
-    parser.addPositionalArgument("file", "Markdown file to open (e.g. from a file manager's \"Open with\").", "[file]");
+    parser.addPositionalArgument("files", "Markdown files to open (e.g. from a file manager's \"Open with\").", "[files...]");
     parser.process(app);
 
     // File managers invoke "Open with" as `mdraft /path/to/file.md` (a bare
     // positional argument, per the desktop entry's %F), not via -f/--file.
-    QString filePath;
+    QStringList filePaths;
     if (parser.isSet(fileOpt))
-        filePath = parser.value(fileOpt);
-    else if (!parser.positionalArguments().isEmpty())
-        filePath = parser.positionalArguments().first();
+        filePaths.append(parser.value(fileOpt));
+    for (const QString &path : parser.positionalArguments()) {
+        if (!filePaths.contains(path))
+            filePaths.append(path);
+    }
 
     MainWindow w;
     w.show();
 
-    if (!filePath.isEmpty()) {
+    for (const QString &filePath : filePaths) {
         QFile f(filePath);
         if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QTextStream in(&f);
             w.openFileAt(filePath, in.readAll());
+        } else {
+            QMessageBox::warning(&w, QObject::tr("Open"),
+                QObject::tr("Cannot open file:\n%1\n\n%2").arg(filePath, f.errorString()));
         }
     }
 

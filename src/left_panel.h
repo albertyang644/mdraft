@@ -8,6 +8,7 @@ class QStackedWidget;
 class QListWidget;
 class QListWidgetItem;
 class QLabel;
+class QFileSystemWatcher;
 class OutlineView;
 class OutlineModel;
 
@@ -52,6 +53,7 @@ private:
     OutlineView *m_outlineView;
     QListWidget *m_dirView;
     QLabel *m_dirPathLabel; // "└─ /path/to/dir" header shown above the DIR list
+    QFileSystemWatcher *m_dirWatcher;
     QString m_currentDir;
     bool m_dark;
 };

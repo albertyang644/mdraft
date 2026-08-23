@@ -4,6 +4,7 @@
 #include <QPlainTextEdit>
 
 class QTimer;
+class MarkdownHighlighter;
 
 class MarkdownEditor : public QPlainTextEdit
 {
@@ -13,18 +14,15 @@ public:
 
     // Jump to a line (used by outline navigation)
     void goToLine(int line);
+    void setDarkMode(bool dark);
 
 signals:
     // Emitted (debounced) when the user modifies the document.
     void contentChanged();
 
-protected:
-    void paintEvent(QPaintEvent *e) override;
-
 private:
-    void updateStatsNow();
-
     QTimer *m_changeTimer;
+    MarkdownHighlighter *m_highlighter;
 };
 
 #endif // EDITOR_H

@@ -1,40 +1,25 @@
-cmake_minimum_required(VERSION 3.16)
-project(mdraft_tests LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
-
-find_package(Qt6 REQUIRED COMPONENTS Test Widgets Gui Core)
-find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Test)
 
 # ---- Core native smoke test (no WebEngine needed) ----
 # (editor + outline + highlighter)
-add_executable(core_smoke_test
-    core_smoke_test.cpp
-    ../src/outline_model.cpp
-    ../src/outline_model.h
-    ../src/editor.cpp
-    ../src/editor.h
-    ../src/highlighter.cpp
-    ../src/highlighter.h
-)
-target_include_directories(core_smoke_test PRIVATE ../src)
-target_link_libraries(core_smoke_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_executable(core_smoke_test core_smoke_test.cpp)
+target_link_libraries(core_smoke_test PRIVATE mdraft_core Qt6::Test)
 
 # ---- Preview + shutter lifecycle test (uses WebEngine when available) ----
-add_executable(preview_lifecycle_test
-    preview_lifecycle_test.cpp
-    ../src/preview_widget.cpp
-    ../src/preview_widget.h
-    ../src/markdown_html.cpp
-    ../src/markdown_html.h
-    ../src/shutter_panel.cpp
-    ../src/shutter_panel.h
-)
-target_include_directories(preview_lifecycle_test PRIVATE ../src)
-target_link_libraries(preview_lifecycle_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
-if(Qt6WebEngineWidgets_FOUND)
-    target_compile_definitions(preview_lifecycle_test PRIVATE MDRAFT_HAVE_WEBENGINE)
-    target_link_libraries(preview_lifecycle_test PRIVATE Qt6::WebEngineWidgets)
-endif()
+add_executable(preview_lifecycle_test preview_lifecycle_test.cpp)
+target_link_libraries(preview_lifecycle_test PRIVATE mdraft_core Qt6::Test)
+
+add_executable(mainwindow_test mainwindow_test.cpp)
+target_link_libraries(mainwindow_test PRIVATE mdraft_core Qt6::Test)
+
+add_executable(document_file_test document_file_test.cpp)
+target_link_libraries(document_file_test PRIVATE mdraft_core Qt6::Test)
+
+add_executable(exporter_test exporter_test.cpp)
+target_link_libraries(exporter_test PRIVATE mdraft_core Qt6::Test)
+
+foreach(test_target core_smoke_test preview_lifecycle_test mainwindow_test document_file_test exporter_test)
+    add_test(NAME ${test_target} COMMAND ${test_target})
+    set_tests_properties(${test_target} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox")
+endforeach()

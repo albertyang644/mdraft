@@ -1,6 +1,7 @@
 #include "left_panel.h"
 #include "outline_view.h"
 #include "outline_model.h"
+#include "theme.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -11,6 +12,7 @@
 #include <QLabel>
 #include <QFileInfo>
 #include <QDir>
+#include <QFileSystemWatcher>
 #include <QPainter>
 #include <QSettings>
 
@@ -22,7 +24,7 @@ QIcon makeOutlineIcon(bool dark)
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QPen(QColor(dark ? "#c8d2e0" : "#4a5a70"), 1.4));
+    p.setPen(QPen(QColor(dark ? Theme::OutlineDark : Theme::OutlineLight), 1.4));
     p.drawLine(QPointF(1, 3), QPointF(13, 3));
     p.drawLine(QPointF(4, 7), QPointF(13, 7));
     p.drawLine(QPointF(7, 11), QPointF(13, 11));
@@ -33,6 +35,7 @@ QIcon makeOutlineIcon(bool dark)
 
 LeftPanel::LeftPanel(QWidget *parent)
     : QWidget(parent)
+    , m_dirWatcher(new QFileSystemWatcher(this))
     , m_dark(false)
 {
     auto *outer = new QVBoxLayout(this);
@@ -93,6 +96,8 @@ LeftPanel::LeftPanel(QWidget *parent)
         if (!path.isEmpty())
             emit fileActivated(path);
     });
+    connect(m_dirWatcher, &QFileSystemWatcher::directoryChanged,
+            this, [this]() { refreshDirListing(); });
 
     dirLayout->addWidget(m_dirPathLabel);
     dirLayout->addWidget(m_dirView, 1);
@@ -129,15 +134,15 @@ void LeftPanel::setDarkMode(bool dark)
 
 void LeftPanel::applyToggleBarStyle()
 {
-    const QString barBg = m_dark ? "#232323" : "#e6ebf2";
-    const QString barBorder = m_dark ? "#3a3a3a" : "#cdd7e4";
+    const QString barBg = m_dark ? Theme::DarkPanel : Theme::LightPanel;
+    const QString barBorder = m_dark ? Theme::DarkBorder : Theme::LightBorder;
     m_toggleBar->setStyleSheet(
         QString("QWidget#leftToggleBar { background:%1; border-bottom:1px solid %2; }")
             .arg(barBg, barBorder));
 
-    const QString btnBg = m_dark ? "#2b2b2b" : "#f3f6fa";
-    const QString btnText = m_dark ? "#e0e0e0" : "#33404f";
-    const QString checkedBg = m_dark ? "#4a6fa5" : "#879fbd";
+    const QString btnBg = m_dark ? Theme::DarkWidget : Theme::LightPanelAlt;
+    const QString btnText = m_dark ? Theme::DarkText : Theme::LightText;
+    const QString checkedBg = m_dark ? Theme::CheckedDark : Theme::Accent;
     const QString segStyle = QString(
         "QPushButton { padding:3px 10px; border:1px solid %1; background:%2; color:%3; }"
         "QPushButton:checked { background:%4; color:white; border-color:%4; }")
@@ -150,9 +155,9 @@ void LeftPanel::applyToggleBarStyle()
 
 void LeftPanel::applyDirHeaderStyle()
 {
-    const QString bg = m_dark ? "#232323" : "#eef2f7";
-    const QString border = m_dark ? "#3a3a3a" : "#dde4ec";
-    const QString text = m_dark ? "#9aa7b8" : "#5a6b82";
+    const QString bg = m_dark ? Theme::DarkPanel : Theme::DirLight;
+    const QString border = m_dark ? Theme::DarkBorder : Theme::DirLightBorder;
+    const QString text = m_dark ? Theme::DirDarkText : Theme::DirLightText;
     m_dirPathLabel->setStyleSheet(
         QString("QLabel { background:%1; border-bottom:1px solid %2; color:%3; font-size:11px; }")
             .arg(bg, border, text));
@@ -160,7 +165,11 @@ void LeftPanel::applyDirHeaderStyle()
 
 void LeftPanel::setCurrentFilePath(const QString &path)
 {
+    if (!m_dirWatcher->directories().isEmpty())
+        m_dirWatcher->removePaths(m_dirWatcher->directories());
     m_currentDir = path.isEmpty() ? QString() : QFileInfo(path).absolutePath();
+    if (!m_currentDir.isEmpty() && QDir(m_currentDir).exists())
+        m_dirWatcher->addPath(m_currentDir);
     if (m_stack->currentIndex() == 1)
         refreshDirListing();
 }
@@ -192,9 +201,9 @@ void LeftPanel::refreshDirListing()
         return;
     }
     const QStringList names = QDir(m_currentDir).entryList(
-        QStringList() << "*.md", QDir::Files, QDir::Name);
+        QStringList() << "*.md" << "*.markdown", QDir::Files, QDir::Name);
     if (names.isEmpty()) {
-        auto *item = new QListWidgetItem(tr("No .md files here."));
+        auto *item = new QListWidgetItem(tr("No Markdown files here."));
         item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
         m_dirView->addItem(item);
         return;

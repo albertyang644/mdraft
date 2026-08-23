@@ -1,5 +1,5 @@
-#ifndef HIGHIGHTER_H
-#define HIGHIGHTER_H
+#ifndef HIGHLIGHTER_H
+#define HIGHLIGHTER_H
 
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
@@ -10,6 +10,7 @@ class MarkdownHighlighter : public QSyntaxHighlighter
     Q_OBJECT
 public:
     explicit MarkdownHighlighter(QTextDocument *parent = nullptr);
+    void setDarkMode(bool dark);
 
 protected:
     void highlightBlock(const QString &text) override;
@@ -26,6 +27,9 @@ private:
     QTextCharFormat m_codeFormat;
     QTextCharFormat m_linkFormat;
     QTextCharFormat m_codeblockFormatOld;
+    bool m_darkMode;
+
+    void configureFormats();
 };
 
-#endif // HIGHIGHTER_H
+#endif // HIGHLIGHTER_H

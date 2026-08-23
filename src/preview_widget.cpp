@@ -1,25 +1,47 @@
 #include "preview_widget.h"
 #include "markdown_html.h"
+#include "theme.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
 
 #ifdef MDRAFT_HAVE_WEBENGINE
-#include <QWebEngineView>
 #include <QWebEnginePage>
+#include <QWebEngineProfile>
 #include <QWebEngineSettings>
-#include <QPrinter>
-#include <QTemporaryFile>
+#include <QWebEngineUrlRequestInfo>
+#include <QWebEngineUrlRequestInterceptor>
+#include <QWebEngineView>
 #include <QProcess>
+#include <QTimer>
+
+namespace {
+class LocalOnlyRequestInterceptor final : public QWebEngineUrlRequestInterceptor
+{
+public:
+    using QWebEngineUrlRequestInterceptor::QWebEngineUrlRequestInterceptor;
+
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override
+    {
+        const QString scheme = info.requestUrl().scheme().toLower();
+        if (scheme != QStringLiteral("about")
+            && scheme != QStringLiteral("data")
+            && scheme != QStringLiteral("file")
+            && scheme != QStringLiteral("qrc")) {
+            info.block(true);
+        }
+    }
+};
+}
 #endif
 
 PreviewWidget::PreviewWidget(QWidget *parent)
     : QWidget(parent)
 #ifdef MDRAFT_HAVE_WEBENGINE
+    , m_profile(nullptr)
     , m_view(nullptr)
-    , m_lastPdfPath()
     , m_pandocProcess(nullptr)
-    , m_conversionPending(false)
+    , m_conversionTimeout(new QTimer(this))
     , m_darkMode(false)
 #endif
 
@@ -29,7 +51,21 @@ PreviewWidget::PreviewWidget(QWidget *parent)
 
     m_placeholder = new QWidget(this);
     auto *pl = new QVBoxLayout(m_placeholder);
+#ifdef MDRAFT_HAVE_WEBENGINE
     m_placeholderLabel = new QLabel(tr("Preview panel is closed.\nOpen it to render."), m_placeholder);
+    m_conversionTimeout->setSingleShot(true);
+    m_conversionTimeout->setInterval(30000);
+    connect(m_conversionTimeout, &QTimer::timeout, this, [this]() {
+        if (!m_pandocProcess)
+            return;
+        QProcess *process = m_pandocProcess;
+        process->disconnect(this);
+        process->kill();
+        finishConversion(process, "<pre>" + m_convertingSource.toHtmlEscaped() + "</pre>");
+    });
+#else
+    m_placeholderLabel = new QLabel(tr("Rendered preview is unavailable in this build."), m_placeholder);
+#endif
     m_placeholderLabel->setAlignment(Qt::AlignCenter);
     m_placeholderLabel->setStyleSheet("color: gray;");
     pl->addWidget(m_placeholderLabel);
@@ -46,9 +82,16 @@ void PreviewWidget::ensureWebView()
 #ifdef MDRAFT_HAVE_WEBENGINE
     if (m_view)
         return;
+
+    m_profile = new QWebEngineProfile(this);
+    auto *interceptor = new LocalOnlyRequestInterceptor(m_profile);
+    m_profile->setUrlRequestInterceptor(interceptor);
+
     m_view = new QWebEngineView(this);
+    m_view->setPage(new QWebEnginePage(m_profile, m_view));
     m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
-    m_view->page()->setBackgroundColor(m_darkMode ? QColor("#1e1e1e") : Qt::white); // matches the preview's CSS background
+    m_view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, false);
+    m_view->page()->setBackgroundColor(m_darkMode ? QColor(Theme::DarkEditor) : Qt::white); // matches the preview's CSS background
 
     // The WebView's first paint on X11/GL tends to flash black/blank before
     // content lands. Keep it hidden until content has actually loaded once,
@@ -87,47 +130,60 @@ void PreviewWidget::convertAndRender(const QString &markdown)
 {
 #ifdef MDRAFT_HAVE_WEBENGINE
     if (m_pandocProcess) {
-        // A conversion is already in flight; re-run with the latest text once
-        // it finishes instead of piling up processes.
-        m_conversionPending = true;
+        // The latest source is already in m_pendingMarkdown. Completion always
+        // compares against it before deciding whether another run is needed.
         return;
     }
 
     m_convertingSource = markdown;
     m_pandocProcess = new QProcess(this);
 
-    auto finishConversion = [this](const QString &bodyHtml) {
-        m_lastBodyHtml = bodyHtml;
-        renderHtml(wrapMarkdownHtml(bodyHtml, m_darkMode));
-        m_lastRenderedSource = m_convertingSource;
-        m_pandocProcess->deleteLater();
-        m_pandocProcess = nullptr;
-        if (m_conversionPending) {
-            m_conversionPending = false;
-            convertAndRender(m_pendingMarkdown);
-        }
-    };
+    QProcess *process = m_pandocProcess;
 
-    connect(m_pandocProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this, [this, finishConversion](int exitCode, QProcess::ExitStatus) {
-        if (exitCode == 0)
-            finishConversion(QString::fromUtf8(m_pandocProcess->readAllStandardOutput()));
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, [this, process](int exitCode, QProcess::ExitStatus status) {
+        if (process != m_pandocProcess)
+            return;
+        if (status == QProcess::NormalExit && exitCode == 0)
+            finishConversion(process, QString::fromUtf8(process->readAllStandardOutput()));
         else
-            finishConversion("<pre>" + m_convertingSource.toHtmlEscaped() + "</pre>");
+            finishConversion(process, "<pre>" + m_convertingSource.toHtmlEscaped() + "</pre>");
     });
-    connect(m_pandocProcess, &QProcess::errorOccurred, this, [this, finishConversion](QProcess::ProcessError) {
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
         // pandoc missing or failed to start: fall back to a raw escaped dump
         // so the preview still shows something.
-        finishConversion("<pre>" + m_convertingSource.toHtmlEscaped() + "</pre>");
+        if (process->state() != QProcess::NotRunning)
+            process->kill();
+        finishConversion(process, "<pre>" + m_convertingSource.toHtmlEscaped() + "</pre>");
     });
 
-    m_pandocProcess->start("pandoc", {"--from=gfm", "--to=html"});
-    m_pandocProcess->write(markdown.toUtf8());
-    m_pandocProcess->closeWriteChannel();
+    process->start("pandoc", {"--from=gfm", "--to=html"});
+    process->write(markdown.toUtf8());
+    process->closeWriteChannel();
+    m_conversionTimeout->start();
 #else
     Q_UNUSED(markdown);
 #endif
 }
+
+#ifdef MDRAFT_HAVE_WEBENGINE
+void PreviewWidget::finishConversion(QProcess *process, const QString &bodyHtml)
+{
+    if (!process || process != m_pandocProcess)
+        return;
+
+    m_conversionTimeout->stop();
+    process->disconnect(this);
+    m_lastBodyHtml = bodyHtml;
+    renderHtml(wrapMarkdownHtml(bodyHtml, m_darkMode));
+    m_lastRenderedSource = m_convertingSource;
+    m_pandocProcess = nullptr;
+    process->deleteLater();
+
+    if (m_pendingMarkdown != m_lastRenderedSource)
+        convertAndRender(m_pendingMarkdown);
+}
+#endif
 
 void PreviewWidget::openPreview()
 {
@@ -163,15 +219,19 @@ void PreviewWidget::teardownPreview()
         // half-torn-down state.
         m_pandocProcess->disconnect(this);
         m_pandocProcess->kill();
-        m_pandocProcess->waitForFinished(200);
         m_pandocProcess->deleteLater();
         m_pandocProcess = nullptr;
-        m_conversionPending = false;
+        m_conversionTimeout->stop();
     }
     if (m_view) {
         delete m_view;
         m_view = nullptr;
         m_placeholder->show();
+    }
+    if (m_profile) {
+        m_profile->setUrlRequestInterceptor(nullptr);
+        delete m_profile;
+        m_profile = nullptr;
     }
 #endif
 }
@@ -183,20 +243,11 @@ void PreviewWidget::setDarkMode(bool dark)
         return;
     m_darkMode = dark;
     if (m_view) {
-        m_view->page()->setBackgroundColor(m_darkMode ? QColor("#1e1e1e") : Qt::white);
+        m_view->page()->setBackgroundColor(m_darkMode ? QColor(Theme::DarkEditor) : Qt::white);
         if (!m_lastBodyHtml.isEmpty())
             renderHtml(wrapMarkdownHtml(m_lastBodyHtml, m_darkMode));
     }
 #else
     Q_UNUSED(dark);
-#endif
-}
-
-QString PreviewWidget::pdfFilePath() const
-{
-#ifdef MDRAFT_HAVE_WEBENGINE
-    return m_lastPdfPath;
-#else
-    return QString();
 #endif
 }

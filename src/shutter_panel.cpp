@@ -2,16 +2,14 @@
 
 #include <QVBoxLayout>
 
-ShutterPanel::ShutterPanel(QWidget *content, int side, QWidget *parent)
+ShutterPanel::ShutterPanel(QWidget *content, QWidget *parent)
     : QWidget(parent)
-    , m_side(side)
-    , m_content(content)
     , m_open(true)
 {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    layout->addWidget(m_content);
+    layout->addWidget(content);
 }
 
 void ShutterPanel::setOpen(bool open)
@@ -33,9 +31,4 @@ void ShutterPanel::setOpen(bool open)
 bool ShutterPanel::isOpen() const
 {
     return m_open;
-}
-
-QWidget *ShutterPanel::content() const
-{
-    return m_content;
 }

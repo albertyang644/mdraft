@@ -29,7 +29,7 @@
 - [x] Add PDF export engine.
 - [x] Add LaTeX/Pandoc-compatible export path where available.
 - [x] Ensure export engine detection does not block initial editor startup. — pandoc/pdflatex are only invoked on demand, never probed at startup
-- [ ] Add startup/performance tests or checks. — structural HARD_CONTRACT is covered by tests; no timing/perf benchmark yet
+- [x] Add startup/performance tests or checks. — MainWindow construction is timed and asserts no WebView exists, even with the removed legacy preference set
 - [x] Add editor responsiveness tests or checks. — `editorStatsSignalDebounced` in `core_smoke_test.cpp`
 - [x] Add documentation after success criteria are met. — `README.md` (overview, build/run, dependencies) and `docs/ARCHITECTURE.md`
 
@@ -37,8 +37,8 @@
 
 - [x] Tabbed multi-document editor.
 - [x] DIR view: browse and open sibling .md files from the left panel.
-- [x] Autosave (debounced, path-having tabs only) with a `*` dirty indicator
-  on the tab; close/quit only prompts for untitled documents, which have
-  nowhere to autosave to.
+- [x] Atomic autosave (debounced, path-having tabs only) with external-change
+  detection and a `*` dirty indicator; close/quit refuses failed named saves
+  and confirms discarding dirty untitled documents.
 - [x] Light/Dark mode persists across restarts (not just the toggle itself).
 - [x] "Open with" from a file manager (positional CLI argument).

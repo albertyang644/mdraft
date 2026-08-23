@@ -8,9 +8,14 @@
 #include "shutter_panel.h"
 #include "left_panel.h"
 #include "toggle_switch.h"
+#include "theme.h"
 
 #include <QSplitter>
+#include <QApplication>
+#include <QClipboard>
+#include <QFile>
 #include <QLabel>
+#include <QMimeData>
 #include <QPushButton>
 #include <QFileDialog>
 #include <QMessageBox>
@@ -21,19 +26,15 @@
 #include <QTextCursor>
 #include <QFileInfo>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QPainter>
 #include <QHBoxLayout>
 #include <QTimer>
 #include <QTabWidget>
 #include <QTabBar>
 #include <QCloseEvent>
+#include <QDir>
 #include <cmath>
-
-#ifdef MDRAFT_HAVE_WEBENGINE
-#include <QWebEnginePage>
-#include <QTemporaryFile>
-#include <QTimer>
-#endif
 
 namespace {
 // A small "toggle sidebar" glyph: an outlined rect with a vertical divider,
@@ -53,9 +54,9 @@ QIcon makeShutterIcon(bool paneOnLeft)
     QRectF paneRect = paneOnLeft
         ? QRectF(outer.left(), outer.top(), dividerX - outer.left(), outer.height())
         : QRectF(dividerX, outer.top(), outer.right() - dividerX, outer.height());
-    p.fillRect(paneRect, QColor("#879fbd"));
+    p.fillRect(paneRect, QColor(Theme::Accent));
 
-    p.setPen(QPen(QColor("#5a6b82"), 1.2));
+    p.setPen(QPen(QColor(Theme::AccentDark), 1.2));
     p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(outer, 2, 2);
     p.drawLine(QPointF(dividerX, outer.top()), QPointF(dividerX, outer.bottom()));
@@ -70,10 +71,10 @@ QIcon makeSunIcon()
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
     const QPointF c(7, 7);
-    p.setBrush(QColor("#f5a623"));
+    p.setBrush(QColor(Theme::Sun));
     p.setPen(Qt::NoPen);
     p.drawEllipse(c, 3.2, 3.2);
-    p.setPen(QPen(QColor("#f5a623"), 1.2));
+    p.setPen(QPen(QColor(Theme::Sun), 1.2));
     for (int i = 0; i < 8; ++i) {
         const qreal angle = i * M_PI / 4.0;
         const QPointF dir(std::cos(angle), std::sin(angle));
@@ -89,7 +90,7 @@ QIcon makeMoonIcon()
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setBrush(QColor("#8a97a8"));
+    p.setBrush(QColor(Theme::Moon));
     p.setPen(Qt::NoPen);
     p.drawEllipse(QRectF(2, 2, 10, 10));
     p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
@@ -118,9 +119,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_leftToggleBtn(nullptr)
     , m_rightToggleBtn(nullptr)
     , m_topFileLabel(nullptr)
-    , m_alwaysOpenPreviewAction(nullptr)
     , m_previewDebounce(nullptr)
-    , m_autosaveDebounce(nullptr)
     , m_darkMode(false)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
@@ -131,6 +130,9 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setWindowTitle("mdraft");
     resize(1280, 820);
+    const QByteArray savedGeometry = QSettings().value("windowGeometry").toByteArray();
+    if (!savedGeometry.isEmpty())
+        restoreGeometry(savedGeometry);
 
     // --- Three-panel layout ---
     m_splitter = new QSplitter(Qt::Horizontal, this);
@@ -140,6 +142,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_leftPanel->setOutlineModel(m_outlineModel);
 
     m_editorTabs = new QTabWidget();
+    m_editorTabs->setObjectName("editorTabs");
     m_editorTabs->setTabsClosable(true);
     m_editorTabs->setMovable(true);
     m_editorTabs->setDocumentMode(true);
@@ -149,13 +152,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_preview = new PreviewWidget();
 
     // Left panel: its own shutter container (opens/closes the outline/DIR view).
-    m_leftShutter = new ShutterPanel(m_leftPanel, /*side=*/0, m_splitter);
+    m_leftShutter = new ShutterPanel(m_leftPanel, m_splitter);
     m_leftShutter->setOpen(true); // outline starts OPEN
 
     // Right panel: its own shutter container (opens/closes the preview).
-    // Closed by default; the "always open webview" setting can override this.
-    m_rightShutter = new ShutterPanel(m_preview, /*side=*/1, m_splitter);
-    m_rightShutter->setOpen(false); // preview starts CLOSED -> WebView stays uncreated
+    m_rightShutter = new ShutterPanel(m_preview, m_splitter);
 
     m_splitter->addWidget(m_leftShutter);
     m_splitter->addWidget(m_editorTabs);
@@ -163,6 +164,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_splitter->setStretchFactor(0, 0); // left: fixed
     m_splitter->setStretchFactor(1, 1); // editor: grows
     m_splitter->setStretchFactor(2, 0); // right: fixed
+    m_splitter->setCollapsible(0, false);
+    m_splitter->setCollapsible(2, false);
     m_splitter->setSizes({260, 700, 18});
 
     // --- Central widget: top bar above the three-panel splitter ---
@@ -177,14 +180,17 @@ MainWindow::MainWindow(QWidget *parent)
 
     // --- Wire outline navigation ---
     connect(m_leftPanel, &LeftPanel::goToBlock, this, [this](int block) {
-        m_editor->goToLine(block);
+        if (m_editor)
+            m_editor->goToLine(block);
     });
 
     // --- DIR view: click a sibling .md file to open it in a new tab ---
     connect(m_leftPanel, &LeftPanel::fileActivated, this, [this](const QString &path) {
         QFile f(path);
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            statusBar()->showMessage(tr("Cannot open %1: %2").arg(path, f.errorString()), 5000);
             return;
+        }
         QTextStream in(&f);
         openFileAt(path, in.readAll());
     });
@@ -209,6 +215,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightShutter, &ShutterPanel::closed, this, [this]() {
         m_preview->teardownPreview();
     });
+    // Closing occurs after lifecycle signals are connected. No WebView has
+    // been created, and no setting may override this startup invariant.
+    m_rightShutter->setOpen(false);
 
     // --- Debounced secondary work from the editor ---
     // Preview conversion shells out to pandoc, so it's debounced separately
@@ -219,15 +228,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_previewDebounce->setInterval(250);
     connect(m_previewDebounce, &QTimer::timeout, this, &MainWindow::updatePreview);
 
-    // Autosave: a couple of seconds after typing stops, silently save
-    // whichever tab was being edited (only if it already has a path).
-    m_autosaveDebounce = new QTimer(this);
-    m_autosaveDebounce->setSingleShot(true);
-    m_autosaveDebounce->setInterval(2000);
-    connect(m_autosaveDebounce, &QTimer::timeout, this, [this]() {
-        flushAutosave(m_autosaveTarget);
-    });
-
     createMenus();
     createStatusBar();
 
@@ -236,31 +236,14 @@ MainWindow::MainWindow(QWidget *parent)
     // status bar (and menus) must already exist by this point.
     m_editor = createEditorTab(QString(), QString());
 
-    // "Always open webview" setting: preview is closed by default, but the
-    // user can opt into having it open on launch.
     QSettings settings;
-    const bool alwaysOpenPreview = settings.value("alwaysOpenWebview", false).toBool();
-    m_alwaysOpenPreviewAction->setChecked(alwaysOpenPreview);
-    if (alwaysOpenPreview)
-        m_rightShutter->setOpen(true);
-
     // Light/Dark remembers whichever side was last picked, same as the
     // Outline/DIR toggle.
-    if (settings.value("darkMode", false).toBool())
-        toggleDarkMode();
+    applyDarkMode(settings.value("darkMode", false).toBool(), false);
 
     // Keyboard toggles for the panels are the Ctrl+1 / Ctrl+3 shortcuts
     // already attached to the View menu actions above.
 
-    // Seed some content so the UI is usable immediately.
-    m_editor->setPlainText(QStringLiteral(
-        "# Hello, mdraft\n\n"
-        "This is a *Markdown* editor. Click an outline entry on the left to "
-        "jump to that heading.\n\n"
-        "## Features\n\n- Three-panel layout\n- Native outline\n- Live stats\n"
-        "- Light/dark toggle\n\n```cpp\nint main(){return 0;}\n```\n"
-    ));
-    m_editor->document()->setModified(false); // seed content isn't a user edit
     syncActiveTabUi();
     statusBar()->showMessage(tr("Ready"), 2000);
 }
@@ -273,21 +256,23 @@ MainWindow::~MainWindow() = default;
 
 QString MainWindow::currentMarkdown() const
 {
-    return m_editor->toPlainText();
+    return m_editor ? m_editor->toPlainText() : QString();
 }
 
 void MainWindow::setCurrentFile(const QString &path)
 {
-    m_currentFile = path;
+    if (!m_editor)
+        return;
     setFilePathOfEditor(m_editor, path);
+    m_currentFile = filePathOfEditor(m_editor);
 
-    QString shown = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
+    QString shown = m_currentFile.isEmpty() ? tr("Untitled") : QFileInfo(m_currentFile).fileName();
     setWindowTitle(QString("%1 — mdraft").arg(shown));
     if (m_topFileLabel)
         m_topFileLabel->setText(shown);
     if (m_fileLabel)
-        m_fileLabel->setText(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
-    m_leftPanel->setCurrentFilePath(path);
+        m_fileLabel->setText(m_currentFile.isEmpty() ? QString() : QFileInfo(m_currentFile).absolutePath());
+    m_leftPanel->setCurrentFilePath(m_currentFile);
     updateTabModifiedIndicator(m_editor);
 }
 
@@ -297,35 +282,66 @@ void MainWindow::setCurrentFile(const QString &path)
 
 QString MainWindow::filePathOfEditor(MarkdownEditor *ed) const
 {
-    return ed->property("mdraftFilePath").toString();
+    const auto it = m_documents.constFind(ed);
+    return it == m_documents.cend() ? QString() : it->path();
 }
 
 void MainWindow::setFilePathOfEditor(MarkdownEditor *ed, const QString &path)
 {
-    ed->setProperty("mdraftFilePath", path);
+    if (ed)
+        m_documents[ed].setPath(path);
+}
+
+MarkdownEditor *MainWindow::editorForPath(const QString &path) const
+{
+    const QString normalized = DocumentFile::normalizedPath(path);
+    for (int i = 0; i < m_editorTabs->count(); ++i) {
+        auto *editor = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(i));
+        if (editor && filePathOfEditor(editor) == normalized)
+            return editor;
+    }
+    return nullptr;
 }
 
 MarkdownEditor *MainWindow::createEditorTab(const QString &path, const QString &content)
 {
     auto *editor = new MarkdownEditor();
+    editor->setDarkMode(m_darkMode);
     editor->setPlainText(content);
     editor->document()->setModified(false); // loading content isn't a user edit
-    setFilePathOfEditor(editor, path);
+    m_documents.insert(editor, DocumentFile(path));
+
+    auto *autosaveTimer = new QTimer(editor);
+    autosaveTimer->setSingleShot(true);
+    autosaveTimer->setInterval(2000);
+    connect(autosaveTimer, &QTimer::timeout, this, [this, editor]() {
+        flushAutosave(editor);
+    });
 
     // Only the active tab's edits should drive stats/outline/preview, but
     // the modified indicator and autosave scheduling apply to whichever tab
     // was actually typed in, active or not.
-    connect(editor, &MarkdownEditor::contentChanged, this, [this, editor]() {
+    connect(editor, &MarkdownEditor::contentChanged, this, [this, editor, autosaveTimer]() {
         updateTabModifiedIndicator(editor);
-        if (editor->document()->isModified() && !filePathOfEditor(editor).isEmpty()) {
-            m_autosaveTarget = editor;
-            m_autosaveDebounce->start();
-        }
+        if (editor->document()->isModified() && !filePathOfEditor(editor).isEmpty())
+            autosaveTimer->start();
         if (editor != m_editor)
             return;
         updateStats();
         refreshOutline();
         m_previewDebounce->start();
+    });
+    connect(editor, &QPlainTextEdit::undoAvailable, this, [this, editor](bool) {
+        if (editor == m_editor)
+            updateEditActions();
+    });
+    connect(editor, &QPlainTextEdit::redoAvailable, this, [this, editor](bool) {
+        if (editor == m_editor)
+            updateEditActions();
+    });
+    connect(editor, &QPlainTextEdit::copyAvailable, this, [this, editor](bool) {
+        if (editor == m_editor)
+            updateEditActions();
     });
 
     const QString label = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
@@ -337,9 +353,12 @@ MarkdownEditor *MainWindow::createEditorTab(const QString &path, const QString &
 
 void MainWindow::onTabChanged(int index)
 {
-    if (index < 0)
-        return;
     MarkdownEditor *previous = m_editor;
+    if (index < 0) {
+        m_editor.clear();
+        m_currentFile.clear();
+        return;
+    }
     m_editor = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(index));
     if (!m_editor)
         return;
@@ -355,10 +374,10 @@ void MainWindow::onTabCloseRequested(int index)
     auto *ed = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(index));
     if (ed) {
         if (!filePathOfEditor(ed).isEmpty()) {
-            flushAutosave(ed);
+            if (!flushAutosave(ed, true))
+                return;
         } else if (ed->document()->isModified() && !ed->toPlainText().isEmpty()) {
-            // Untitled documents have nowhere to autosave to; this is the
-            // only case where closing can actually lose work.
+            // Untitled documents need an explicit discard confirmation.
             const auto r = QMessageBox::question(this, tr("Close Tab"),
                 tr("This untitled document has unsaved changes and can't be "
                    "autosaved. Close it anyway?"),
@@ -370,6 +389,7 @@ void MainWindow::onTabCloseRequested(int index)
 
     QWidget *w = m_editorTabs->widget(index);
     m_editorTabs->removeTab(index);
+    m_documents.remove(ed);
     delete w;
 
     // Always keep at least one tab open.
@@ -390,20 +410,14 @@ void MainWindow::updateTabModifiedIndicator(MarkdownEditor *ed)
     m_editorTabs->setTabToolTip(idx, path);
 }
 
-void MainWindow::flushAutosave(MarkdownEditor *ed)
+bool MainWindow::flushAutosave(MarkdownEditor *ed, bool reportError)
 {
     if (!ed || !ed->document()->isModified())
-        return;
+        return true;
     const QString path = filePathOfEditor(ed);
     if (path.isEmpty())
-        return;
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
-        return; // silent: autosave shouldn't interrupt with a dialog
-    QTextStream out(&f);
-    out << ed->toPlainText();
-    ed->document()->setModified(false);
-    updateTabModifiedIndicator(ed);
+        return false;
+    return saveEditorToPath(ed, path, reportError, true);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -413,8 +427,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
         auto *ed = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(i));
         if (!ed)
             continue;
-        if (!filePathOfEditor(ed).isEmpty())
-            flushAutosave(ed); // has a path: just save it, no need to ask
+        if (!filePathOfEditor(ed).isEmpty()) {
+            if (!flushAutosave(ed, true)) {
+                event->ignore();
+                return;
+            }
+        }
         else if (ed->document()->isModified() && !ed->toPlainText().isEmpty())
             ++untitledDirty; // nowhere to autosave to: this is the real risk
     }
@@ -429,11 +447,14 @@ void MainWindow::closeEvent(QCloseEvent *event)
             return;
         }
     }
+    QSettings().setValue("windowGeometry", saveGeometry());
     event->accept();
 }
 
 void MainWindow::syncActiveTabUi()
 {
+    if (!m_editor)
+        return;
     m_currentFile = filePathOfEditor(m_editor);
     const QString shown = m_currentFile.isEmpty() ? tr("Untitled") : QFileInfo(m_currentFile).fileName();
     setWindowTitle(QString("%1 — mdraft").arg(shown));
@@ -446,18 +467,17 @@ void MainWindow::syncActiveTabUi()
     updateStats();
     refreshOutline();
     updatePreview();
+    updateEditActions();
 }
 
 void MainWindow::openFileAt(const QString &path, const QString &content)
 {
+    const QString normalized = DocumentFile::normalizedPath(path);
     // Reuse an already-open tab for this file instead of opening a duplicate.
-    for (int i = 0; i < m_editorTabs->count(); ++i) {
-        auto *ed = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(i));
-        if (ed && filePathOfEditor(ed) == path) {
-            m_editorTabs->setCurrentIndex(i);
-            statusBar()->showMessage(tr("Opened %1").arg(path), 3000);
-            return;
-        }
+    if (MarkdownEditor *existing = editorForPath(normalized)) {
+        m_editorTabs->setCurrentWidget(existing);
+        statusBar()->showMessage(tr("Opened %1").arg(normalized), 3000);
+        return;
     }
 
     // Replace the initial empty/untitled tab in place rather than leaving a
@@ -466,12 +486,12 @@ void MainWindow::openFileAt(const QString &path, const QString &content)
         && m_editor->toPlainText().isEmpty()) {
         m_editor->setPlainText(content);
         m_editor->document()->setModified(false); // loading content isn't a user edit
-        setCurrentFile(path);
+        setCurrentFile(normalized);
     } else {
-        m_editor = createEditorTab(path, content);
-        setCurrentFile(path);
+        m_editor = createEditorTab(normalized, content);
+        setCurrentFile(normalized);
     }
-    statusBar()->showMessage(tr("Opened %1").arg(path), 3000);
+    statusBar()->showMessage(tr("Opened %1").arg(normalized), 3000);
 }
 
 // ---------------------------------------------------------------------------
@@ -482,36 +502,38 @@ void MainWindow::createMenus()
 {
     // File
     QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
-    fileMenu->addAction(tr("&New"), this, &MainWindow::newFile, QKeySequence::New);
-    fileMenu->addAction(tr("&Open…"), this, &MainWindow::openFile, QKeySequence::Open);
+    fileMenu->addAction(tr("&New"), QKeySequence::New, this, &MainWindow::newFile);
+    fileMenu->addAction(tr("&Open…"), QKeySequence::Open, this, &MainWindow::openFile);
     fileMenu->addSeparator();
-    fileMenu->addAction(tr("&Save"), this, &MainWindow::saveFile, QKeySequence::Save);
-    fileMenu->addAction(tr("Save &As…"), this, &MainWindow::saveFileAs, QKeySequence::SaveAs);
+    fileMenu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::saveFile);
+    fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveFileAs);
     fileMenu->addSeparator();
     QMenu *exportMenu = fileMenu->addMenu(tr("E&xport"));
     exportMenu->addAction(tr("Export &HTML…"), this, &MainWindow::exportHtml);
     exportMenu->addAction(tr("Export &PDF…"), this, &MainWindow::exportPdf);
     exportMenu->addAction(tr("Export &LaTeX…"), this, &MainWindow::exportLatex);
     fileMenu->addSeparator();
-    fileMenu->addAction(tr("E&xit"), this, &QWidget::close, QKeySequence::Quit);
+    fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
     // Edit
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
     // Bound as lambdas (not directly to m_editor's own slots) so these always
     // act on whichever tab is currently active, not the tab that happened to
     // be active when the menu was built.
-    m_undoAction = editMenu->addAction(tr("&Undo"), this, [this]() { m_editor->undo(); }, QKeySequence::Undo);
-    m_redoAction = editMenu->addAction(tr("&Redo"), this, [this]() { m_editor->redo(); }, QKeySequence::Redo);
+    m_undoAction = editMenu->addAction(tr("&Undo"), QKeySequence::Undo, this, [this]() { m_editor->undo(); });
+    m_redoAction = editMenu->addAction(tr("&Redo"), QKeySequence::Redo, this, [this]() { m_editor->redo(); });
     editMenu->addSeparator();
-    m_cutAction = editMenu->addAction(tr("Cu&t"), this, [this]() { m_editor->cut(); }, QKeySequence::Cut);
-    m_copyAction = editMenu->addAction(tr("&Copy"), this, [this]() { m_editor->copy(); }, QKeySequence::Copy);
-    m_pasteAction = editMenu->addAction(tr("&Paste"), this, [this]() { m_editor->paste(); }, QKeySequence::Paste);
-    m_selectAllAction = editMenu->addAction(tr("Select &All"), this, [this]() { m_editor->selectAll(); }, QKeySequence::SelectAll);
+    m_cutAction = editMenu->addAction(tr("Cu&t"), QKeySequence::Cut, this, [this]() { m_editor->cut(); });
+    m_copyAction = editMenu->addAction(tr("&Copy"), QKeySequence::Copy, this, [this]() { m_editor->copy(); });
+    m_pasteAction = editMenu->addAction(tr("&Paste"), QKeySequence::Paste, this, [this]() { m_editor->paste(); });
+    m_selectAllAction = editMenu->addAction(tr("Select &All"), QKeySequence::SelectAll, this, [this]() { m_editor->selectAll(); });
+    connect(QApplication::clipboard(), &QClipboard::dataChanged,
+            this, &MainWindow::updateEditActions);
 
     // Format
     QMenu *formatMenu = menuBar()->addMenu(tr("F&ormat"));
-    formatMenu->addAction(tr("&Bold"), this, &MainWindow::boldSelection, QKeySequence(Qt::CTRL | Qt::Key_B));
-    formatMenu->addAction(tr("&Italic"), this, &MainWindow::italicSelection, QKeySequence(Qt::CTRL | Qt::Key_I));
+    formatMenu->addAction(tr("&Bold"), QKeySequence(Qt::CTRL | Qt::Key_B), this, &MainWindow::boldSelection);
+    formatMenu->addAction(tr("&Italic"), QKeySequence(Qt::CTRL | Qt::Key_I), this, &MainWindow::italicSelection);
     formatMenu->addSeparator();
     QMenu *headingMenu = formatMenu->addMenu(tr("&Heading"));
     for (int lvl = 1; lvl <= 4; ++lvl)
@@ -528,14 +550,6 @@ void MainWindow::createMenus()
     viewMenu->addSeparator();
     viewMenu->addAction(tr("&Light/Dark Mode"), QKeySequence("Ctrl+D"), this, &MainWindow::toggleDarkMode);
 
-    // Settings
-    QMenu *settingsMenu = menuBar()->addMenu(tr("&Settings"));
-    m_alwaysOpenPreviewAction = settingsMenu->addAction(tr("Always Open Preview on Launch"));
-    m_alwaysOpenPreviewAction->setCheckable(true);
-    connect(m_alwaysOpenPreviewAction, &QAction::toggled, this, [](bool checked) {
-        QSettings settings;
-        settings.setValue("alwaysOpenWebview", checked);
-    });
 }
 
 void MainWindow::createTopBar()
@@ -580,12 +594,12 @@ void MainWindow::applyTopBarTheme()
     // stylesheet + an explicit label color), which wins over the app-wide
     // dark-mode stylesheet's generic QWidget rule — so they need to be
     // updated explicitly rather than relying on the cascade.
-    const QString bg = m_darkMode ? "#232323" : "#e6ebf2";
-    const QString border = m_darkMode ? "#3a3a3a" : "#cdd7e4";
+    const QString bg = m_darkMode ? Theme::DarkPanel : Theme::LightPanel;
+    const QString border = m_darkMode ? Theme::DarkBorder : Theme::LightBorder;
     m_topBar->setStyleSheet(
         QString("QWidget#topBar { background:%1; border-bottom:1px solid %2; }").arg(bg, border));
     m_topFileLabel->setStyleSheet(
-        QString("font-weight:600; color:%1;").arg(m_darkMode ? "#e8edf5" : "#33404f"));
+        QString("font-weight:600; color:%1;").arg(m_darkMode ? Theme::DarkTopText : Theme::LightText));
 }
 
 void MainWindow::createStatusBar()
@@ -632,23 +646,41 @@ void MainWindow::createStatusBar()
 
 void MainWindow::updateStats()
 {
+    if (!m_editor)
+        return;
     const QString text = m_editor->toPlainText();
     // Word count: split on whitespace.
     int words = 0;
     if (!text.trimmed().isEmpty())
-        words = text.trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).size();
+        words = static_cast<int>(
+            text.trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).size());
     m_wordLabel->setText(QString("%1 words").arg(words));
     m_charLabel->setText(QString("%1 chars").arg(text.length()));
 }
 
 void MainWindow::refreshOutline()
 {
-    m_outlineModel->setMarkdown(m_editor->toPlainText());
+    if (m_editor)
+        m_outlineModel->setMarkdown(m_editor->toPlainText());
 }
 
 void MainWindow::updatePreview()
 {
-    m_preview->setMarkdown(m_editor->toPlainText());
+    if (m_editor)
+        m_preview->setMarkdown(m_editor->toPlainText());
+}
+
+void MainWindow::updateEditActions()
+{
+    const bool hasEditor = !m_editor.isNull();
+    const bool hasSelection = hasEditor && m_editor->textCursor().hasSelection();
+    const QMimeData *clipboardData = QApplication::clipboard()->mimeData();
+    m_undoAction->setEnabled(hasEditor && m_editor->document()->isUndoAvailable());
+    m_redoAction->setEnabled(hasEditor && m_editor->document()->isRedoAvailable());
+    m_cutAction->setEnabled(hasSelection);
+    m_copyAction->setEnabled(hasSelection);
+    m_pasteAction->setEnabled(hasEditor && clipboardData && clipboardData->hasText());
+    m_selectAllAction->setEnabled(hasEditor && !m_editor->document()->isEmpty());
 }
 
 // ---------------------------------------------------------------------------
@@ -693,25 +725,52 @@ void MainWindow::saveFileAs()
                                                 QString(), tr("Markdown (*.md);;All Files (*)"));
     if (path.isEmpty())
         return;
-    if (!path.endsWith(".md"))
+    if (!path.endsWith(".md", Qt::CaseInsensitive))
         path += ".md";
-    saveToPath(path);
-    setCurrentFile(path);
-}
+    path = DocumentFile::normalizedPath(path);
 
-void MainWindow::saveToPath(const QString &path)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, tr("Save"), tr("Cannot write:\n%1").arg(path));
+    if (MarkdownEditor *existing = editorForPath(path); existing && existing != m_editor) {
+        QMessageBox::warning(this, tr("Save As"),
+            tr("That file is already open in another tab:\n%1").arg(path));
+        m_editorTabs->setCurrentWidget(existing);
         return;
     }
-    QTextStream out(&f);
-    out << m_editor->toPlainText();
-    f.close();
-    m_editor->document()->setModified(false);
-    updateTabModifiedIndicator(m_editor);
-    statusBar()->showMessage(tr("Saved %1").arg(path), 2000);
+
+    if (saveToPath(path))
+        setCurrentFile(path);
+}
+
+bool MainWindow::saveToPath(const QString &path)
+{
+    if (!m_editor)
+        return false;
+    const bool samePath = filePathOfEditor(m_editor) == DocumentFile::normalizedPath(path);
+    return saveEditorToPath(m_editor, path, true, samePath);
+}
+
+bool MainWindow::saveEditorToPath(MarkdownEditor *editor, const QString &path,
+                                  bool reportError, bool checkExternalChanges)
+{
+    if (!editor)
+        return false;
+
+    DocumentSaveResult result = m_documents[editor].save(
+        editor->toPlainText(), path, checkExternalChanges);
+    if (!result.ok) {
+        updateTabModifiedIndicator(editor);
+        if (reportError)
+            QMessageBox::warning(this, tr("Save"), result.error);
+        else
+            statusBar()->showMessage(result.error.simplified(), 8000);
+        return false;
+    }
+
+    editor->document()->setModified(false);
+    updateTabModifiedIndicator(editor);
+    if (editor == m_editor)
+        m_currentFile = filePathOfEditor(editor);
+    statusBar()->showMessage(tr("Saved %1").arg(filePathOfEditor(editor)), 2000);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -720,65 +779,44 @@ void MainWindow::saveToPath(const QString &path)
 
 void MainWindow::exportHtml()
 {
-    if (m_currentFile.isEmpty())
-        saveFileAs();
-    if (m_currentFile.isEmpty())
-        return;
-
-    QString outPath = QFileDialog::getSaveFileName(this, tr("Export HTML"),
-                                                   m_currentFile + ".html", tr("HTML (*.html)"));
-    if (outPath.isEmpty())
-        return;
-    QString err;
-    if (Exporter::exportTo(m_currentFile, outPath, "html", err))
-        statusBar()->showMessage(tr("Exported HTML to %1").arg(outPath), 3000);
-    else
-        QMessageBox::warning(this, tr("Export"), err);
+    exportDocument("html", tr("Export HTML"), ".html", tr("HTML (*.html)"));
 }
 
 void MainWindow::exportPdf()
 {
-    if (m_currentFile.isEmpty())
-        saveFileAs();
-    if (m_currentFile.isEmpty())
-        return;
-
-    QString outPath = QFileDialog::getSaveFileName(this, tr("Export PDF"),
-                                                   m_currentFile + ".pdf", tr("PDF (*.pdf)"));
-    if (outPath.isEmpty())
-        return;
-
-#ifdef MDRAFT_HAVE_WEBENGINE
-    // Render current markdown to HTML file, then print via WebEngine.
-    // For simplicity, first try Pandoc; if that fails, copy raw text to <pre>.
-    QString dummyErr;
-    Exporter::exportTo(m_currentFile, outPath, "pdf", dummyErr);
-    statusBar()->showMessage(tr("PDF via Pandoc -> %1").arg(outPath), 3000);
-#else
-    QString err;
-    if (Exporter::exportTo(m_currentFile, outPath, "pdf", err))
-        statusBar()->showMessage(tr("Exported PDF to %1").arg(outPath), 3000);
-    else
-        QMessageBox::warning(this, tr("Export"), err);
-#endif
+    exportDocument("pdf", tr("Export PDF"), ".pdf", tr("PDF (*.pdf)"));
 }
 
 void MainWindow::exportLatex()
 {
-    if (m_currentFile.isEmpty())
-        saveFileAs();
-    if (m_currentFile.isEmpty())
-        return;
+    exportDocument("latex", tr("Export LaTeX"), ".tex", tr("LaTeX (*.tex)"));
+}
 
-    QString outPath = QFileDialog::getSaveFileName(this, tr("Export LaTeX"),
-                                                   m_currentFile + ".tex", tr("LaTeX (*.tex)"));
+void MainWindow::exportDocument(const QString &format, const QString &title,
+                                const QString &suffix, const QString &filter)
+{
+    QString suggested;
+    if (m_currentFile.isEmpty()) {
+        suggested = QDir::home().filePath(tr("Untitled") + suffix);
+    } else {
+        const QFileInfo source(m_currentFile);
+        suggested = source.dir().filePath(source.completeBaseName() + suffix);
+    }
+
+    QString outPath = QFileDialog::getSaveFileName(this, title, suggested, filter);
     if (outPath.isEmpty())
         return;
-    QString err;
-    if (Exporter::exportTo(m_currentFile, outPath, "latex", err))
-        statusBar()->showMessage(tr("Exported LaTeX to %1").arg(outPath), 3000);
-    else
-        QMessageBox::warning(this, tr("Export"), err);
+    if (!outPath.endsWith(suffix, Qt::CaseInsensitive))
+        outPath += suffix;
+
+    statusBar()->showMessage(tr("Exporting to %1…").arg(outPath));
+    Exporter::exportMarkdown(currentMarkdown(), outPath, format, this,
+        [this, outPath](bool ok, const QString &error) {
+            if (ok)
+                statusBar()->showMessage(tr("Exported to %1").arg(outPath), 3000);
+            else
+                QMessageBox::warning(this, tr("Export"), error);
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -798,32 +836,27 @@ void MainWindow::toggleRightPanel()
 
 void MainWindow::toggleDarkMode()
 {
-    m_darkMode = !m_darkMode;
-    QSettings().setValue("darkMode", m_darkMode);
+    applyDarkMode(!m_darkMode, true);
+}
+
+void MainWindow::applyDarkMode(bool dark, bool persist)
+{
+    m_darkMode = dark;
+    if (persist)
+        QSettings().setValue("darkMode", m_darkMode);
     if (m_darkMode) {
-        setStyleSheet(
-            "QWidget { background-color:#2b2b2b; color:#e0e0e0; }"
-            "QMenuBar { background-color:#333; }"
-            "QMenuBar::item:selected { background-color:#444; }"
-            "QMenu { background-color:#2b2b2b; color:#e0e0e0; }"
-            "QStatusBar { background-color:#222; }"
-            "QTreeView { background-color:#2b2b2b; color:#e0e0e0; }"
-            "QListWidget { background-color:#2b2b2b; color:#e0e0e0; }"
-            // QPlainTextEdit paints its viewport separately from generic
-            // QWidget styling, so both the document editor and the DIR
-            // listing need an explicit rule to actually go dark.
-            "QPlainTextEdit { background-color:#1e1e1e; color:#e0e0e0; }"
-            "QTabWidget::pane { background-color:#2b2b2b; border-color:#444; }"
-            "QTabBar::tab { background-color:#333; color:#e0e0e0; padding:4px 10px; }"
-            "QTabBar::tab:selected { background-color:#1e1e1e; }"
-        );
-        m_modeToggle->setChecked(true);
+        setStyleSheet(Theme::darkApplicationStyleSheet());
     } else {
         setStyleSheet(QString());
-        m_modeToggle->setChecked(false);
     }
+    const QSignalBlocker blocker(m_modeToggle);
+    m_modeToggle->setChecked(m_darkMode);
     m_preview->setDarkMode(m_darkMode);
     m_leftPanel->setDarkMode(m_darkMode);
+    for (int i = 0; i < m_editorTabs->count(); ++i) {
+        if (auto *editor = qobject_cast<MarkdownEditor *>(m_editorTabs->widget(i)))
+            editor->setDarkMode(m_darkMode);
+    }
     applyTopBarTheme();
 }
 

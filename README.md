@@ -18,10 +18,10 @@ actually have it open.
   editor. Closing the panel destroys the preview's WebView; nothing about
   it exists at launch or while it's collapsed (see
   [`contracts/HARD_CONTRACT.md`](contracts/HARD_CONTRACT.md)).
-- **Autosave** — a tab with a file path is saved a couple of seconds after
-  you stop typing. Untitled documents can't be autosaved anywhere, so
-  closing one with unsaved content is the one case that asks first. A `*`
-  after the tab name means there are unsaved changes.
+- **Autosave** — a tab with a file path is saved atomically a couple of seconds
+  after you stop typing. External changes and write failures leave the tab
+  dirty and are never overwritten silently. A `*` after the tab name means
+  there are unsaved changes.
 - **Export** — HTML, PDF, and LaTeX via [pandoc](https://pandoc.org/).
   Exported HTML is a standalone, styled document (the same CSS the live
   preview uses), not a bare fragment.
@@ -30,8 +30,8 @@ actually have it open.
 
 ## Dependencies
 
-- Qt6 (Widgets, Gui, Core; WebEngineWidgets optional — preview/PDF-via-
-  WebEngine are disabled at build time if it's not found)
+- Qt6 (Widgets, Gui, Core; WebEngineWidgets optional — rendered preview is
+  disabled at build time if it is not found)
 - CMake ≥ 3.16, a C++17 compiler
 - [`pandoc`](https://pandoc.org/) on `PATH` at runtime, for the live
   preview and HTML/PDF/LaTeX export
@@ -53,10 +53,9 @@ cmake --build build
 ## Tests
 
 ```sh
-cmake -B tests/build -S tests
-cmake --build tests/build
-./tests/build/core_smoke_test
-./tests/build/preview_lifecycle_test
+cmake -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 ## Installing (Linux, per-user)
@@ -72,11 +71,11 @@ writes settings via `~/.config/mdraft/mdraft.conf`.
 ## Command line
 
 ```sh
-mdraft [file]
+mdraft [files...]
 mdraft --file <path>
 ```
 
-Both forms open the given file in a tab. The bare positional form is what
+Both forms open the given files in tabs. The bare positional form is what
 file managers actually invoke for "Open with".
 
 ## Project layout

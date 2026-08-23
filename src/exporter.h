@@ -2,6 +2,9 @@
 #define EXPORTER_H
 
 #include <QString>
+#include <functional>
+
+class QObject;
 
 /**
  * On-demand export to HTML, PDF and LaTeX.
@@ -13,11 +16,11 @@
 class Exporter
 {
 public:
-    static bool exportTo(const QString &srcPath, const QString &dstPath, const QString &format, QString &error);
-    static bool htmlToPdf(const QString &html, const QString &dstPath, QString &error);
+    using Completion = std::function<void(bool ok, const QString &error)>;
 
-private:
-    static QString runProcess(const QString &program, const QStringList &args, bool *ok, QString *err);
+    static void exportMarkdown(const QString &markdown, const QString &dstPath,
+                               const QString &format, QObject *context,
+                               Completion completion);
 };
 
 #endif // EXPORTER_H

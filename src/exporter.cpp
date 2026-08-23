@@ -2,80 +2,125 @@
 #include "markdown_html.h"
 
 #include <QProcess>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QSharedPointer>
+#include <QStringConverter>
 #include <QTextStream>
+#include <QTemporaryFile>
+#include <QTimer>
 
-QString Exporter::runProcess(const QString &program, const QStringList &args, bool *ok, QString *err)
+void Exporter::exportMarkdown(const QString &markdown, const QString &dstPath,
+                              const QString &format, QObject *context,
+                              Completion completion)
 {
-    QProcess p;
-    p.start(program, args);
-    if (!p.waitForStarted(3000)) {
-        if (ok) *ok = false;
-        if (err) *err = QString("Failed to start '%1'. Is it installed?").arg(program);
-        return QString();
+    if (format != "html" && format != "pdf" && format != "latex") {
+        completion(false, QString("Unsupported export format '%1'").arg(format));
+        return;
     }
-    if (!p.waitForFinished(60000)) {
-        p.kill();
-        if (ok) *ok = false;
-        if (err) *err = QString("'%1' timed out.").arg(program);
-        return QString();
-    }
-    QByteArray out = p.readAllStandardOutput();
-    QByteArray cerr = p.readAllStandardError();
-    if (p.exitCode() != 0) {
-        if (ok) *ok = false;
-        if (err) *err = QString("'%1' failed: %2").arg(program, QString::fromUtf8(cerr));
-        return QString();
-    }
-    if (ok) *ok = true;
-    if (err) err->clear();
-    return QString::fromUtf8(out);
-}
 
-bool Exporter::exportTo(const QString &srcPath, const QString &dstPath, const QString &format, QString &error)
-{
-    bool ok = false;
-    QStringList args;
-    args << srcPath << "-o" << dstPath;
-
-    if (format == "html") {
-        // Convert to a bare HTML fragment ourselves, then wrap it with the
-        // same CSS the live preview uses, so the exported file isn't just
-        // unstyled pandoc paragraphs dumped in a browser.
-        const QString body = runProcess("pandoc", {"--from=gfm", "--to=html", srcPath}, &ok, &error);
-        if (!ok)
-            return false;
-
-        QFile f(dstPath);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            error = QString("Cannot write:\n%1").arg(dstPath);
-            return false;
+    QString temporaryOutput;
+    if (format != "html") {
+        const QString extension = format == "pdf" ? ".pdf" : ".tex";
+        QTemporaryFile temporary(
+            QFileInfo(dstPath).dir().filePath(".mdraft-export-XXXXXX" + extension));
+        temporary.setAutoRemove(false);
+        if (!temporary.open()) {
+            completion(false, QStringLiteral("Cannot create a temporary export file next to:\n%1")
+                                  .arg(dstPath));
+            return;
         }
-        QTextStream out(&f);
-        out << wrapMarkdownHtml(body, /*dark=*/false);
-        return true;
-    } else if (format == "pdf") {
-        // Let pandoc pick a LaTeX engine (or try pdflatex).
-        args.prepend("--pdf-engine=pdflatex");
-        runProcess("pandoc", args, &ok, &error);
-        return ok;
-    } else if (format == "latex") {
-        runProcess("pandoc", args, &ok, &error);
-        return ok;
+        temporaryOutput = temporary.fileName();
+        temporary.close();
     }
 
-    error = QString("Unsupported export format '%1'").arg(format);
-    return false;
-}
+    auto *process = new QProcess(context);
+    QObject::connect(process, &QObject::destroyed, [temporaryOutput]() {
+        if (!temporaryOutput.isEmpty())
+            QFile::remove(temporaryOutput);
+    });
+    auto *timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    timeout->setInterval(60000);
+    const auto completed = QSharedPointer<bool>::create(false);
 
-bool Exporter::htmlToPdf(const QString &html, const QString &dstPath, QString &error)
-{
-    Q_UNUSED(html);
-    Q_UNUSED(dstPath);
-    Q_UNUSED(error);
-    // Full WebEngine-based HTML->PDF is implemented in the MainWindow when
-    // WebEngine is available (QWebEnginePage::printToPdf). This stub exists so
-    // the call path is uniform; it is replaced by the WebEngine implementation.
-    error = "WebEngine PDF path not configured.";
-    return false;
+    auto finish = [process, completed, completion, temporaryOutput](bool ok, const QString &error) {
+        if (*completed)
+            return;
+        *completed = true;
+        process->disconnect();
+        if (!temporaryOutput.isEmpty())
+            QFile::remove(temporaryOutput);
+        process->deleteLater();
+        completion(ok, error);
+    };
+
+    QObject::connect(timeout, &QTimer::timeout, context, [process, finish]() {
+        process->kill();
+        finish(false, QStringLiteral("'pandoc' timed out after 60 seconds."));
+    });
+    QObject::connect(process, &QProcess::errorOccurred, context,
+            [finish](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart)
+            finish(false, QStringLiteral("Failed to start 'pandoc'. Is it installed?"));
+    });
+    QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), context,
+            [process, dstPath, temporaryOutput, format, finish](int exitCode, QProcess::ExitStatus status) {
+        if (status != QProcess::NormalExit || exitCode != 0) {
+            const QString detail = QString::fromUtf8(process->readAllStandardError()).trimmed();
+            finish(false, detail.isEmpty() ? QStringLiteral("'pandoc' failed.")
+                                            : QStringLiteral("'pandoc' failed: %1").arg(detail));
+            return;
+        }
+
+        if (format == "html") {
+            QSaveFile file(dstPath);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                finish(false, QStringLiteral("Cannot write:\n%1\n\n%2")
+                                  .arg(dstPath, file.errorString()));
+                return;
+            }
+            QTextStream out(&file);
+            out.setEncoding(QStringConverter::Utf8);
+            out << wrapMarkdownHtml(QString::fromUtf8(process->readAllStandardOutput()), false);
+            out.flush();
+            if (out.status() != QTextStream::Ok || !file.commit()) {
+                finish(false, QStringLiteral("Could not safely write:\n%1\n\n%2")
+                                  .arg(dstPath, file.errorString()));
+                return;
+            }
+        } else {
+            QFile source(temporaryOutput);
+            if (!source.open(QIODevice::ReadOnly)) {
+                finish(false, QStringLiteral("Cannot read the completed export:\n%1")
+                                  .arg(source.errorString()));
+                return;
+            }
+            const QByteArray bytes = source.readAll();
+            QSaveFile destination(dstPath);
+            if (!destination.open(QIODevice::WriteOnly)
+                || destination.write(bytes) != bytes.size()
+                || !destination.commit()) {
+                finish(false, QStringLiteral("Could not safely write:\n%1\n\n%2")
+                                  .arg(dstPath, destination.errorString()));
+                return;
+            }
+        }
+        finish(true, {});
+    });
+
+    QStringList args{"--from=gfm"};
+    if (format == "html")
+        args << "--to=html";
+    else if (format == "pdf")
+        args << "--pdf-engine=pdflatex" << "--output" << temporaryOutput;
+    else
+        args << "--to=latex" << "--output" << temporaryOutput;
+
+    process->start(QStringLiteral("pandoc"), args);
+    process->write(markdown.toUtf8());
+    process->closeWriteChannel();
+    timeout->start();
 }

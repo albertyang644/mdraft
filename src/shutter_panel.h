@@ -16,20 +16,16 @@ class ShutterPanel : public QWidget
 {
     Q_OBJECT
 public:
-    // side: 0 = left panel, 1 = right panel
-    explicit ShutterPanel(QWidget *content, int side, QWidget *parent = nullptr);
+    explicit ShutterPanel(QWidget *content, QWidget *parent = nullptr);
 
     void setOpen(bool open);
     bool isOpen() const;
-    QWidget *content() const;
 
 signals:
     void opened();
     void closed();
 
 private:
-    int m_side;             // 0 left, 1 right
-    QWidget *m_content;
     bool m_open;
 };
 
