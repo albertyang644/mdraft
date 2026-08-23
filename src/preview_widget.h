@@ -43,6 +43,15 @@ public:
     // app-wide stylesheet can't reach it).
     void setDarkMode(bool dark);
 
+    // Scroll-lock support. The rendered page is driven from an isolated
+    // script world, so this works while page JavaScript stays disabled and
+    // a document's own <script> tags remain inert.
+    void setScrollFraction(qreal fraction);
+
+signals:
+    // Emitted when the user scrolls the rendered page itself.
+    void scrolled(qreal fraction);
+
 private:
     void ensureWebView();
     void renderHtml(const QString &html);
@@ -66,6 +75,7 @@ private:
     QTimer *m_conversionTimeout;
     QString m_convertingSource;     // source text the in-flight process was started with
     bool m_darkMode;
+    qreal m_appliedFraction = -1.0; // last fraction we drove; used to spot our own echo
 #endif
 
     friend class PreviewLifecycleTest;

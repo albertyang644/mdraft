@@ -8,6 +8,7 @@
 #ifdef MDRAFT_HAVE_WEBENGINE
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
+#include <QWebEngineScript>
 #include <QWebEngineSettings>
 #include <QWebEngineUrlRequestInfo>
 #include <QWebEngineUrlRequestInterceptor>
@@ -100,6 +101,21 @@ void PreviewWidget::ensureWebView()
     connect(m_view, &QWebEngineView::loadFinished, this, [this](bool) {
         if (m_view && !m_view->isVisible())
             m_view->setVisible(true);
+    });
+
+    connect(m_view->page(), &QWebEnginePage::scrollPositionChanged, this,
+            [this](const QPointF &position) {
+        const qreal span = m_view->page()->contentsSize().height() - m_view->height();
+        if (span <= 1.0)
+            return;
+        const qreal fraction = qBound(0.0, position.y() / span, 1.0);
+        // One scrollTo can emit several scrollPositionChanged events, so a
+        // one-shot flag would let the tail of our own scroll look like user
+        // input and feed back. Compare against what we last drove instead.
+        if (m_appliedFraction >= 0.0 && qAbs(fraction - m_appliedFraction) < 0.01)
+            return;
+        m_appliedFraction = -1.0;
+        emit scrolled(fraction);
     });
 
     m_layout->addWidget(m_view);
@@ -233,6 +249,25 @@ void PreviewWidget::teardownPreview()
         delete m_profile;
         m_profile = nullptr;
     }
+#endif
+}
+
+void PreviewWidget::setScrollFraction(qreal fraction)
+{
+#ifdef MDRAFT_HAVE_WEBENGINE
+    if (!m_view)
+        return;
+    m_appliedFraction = qBound(0.0, fraction, 1.0);
+    const QString js = QStringLiteral(
+        "(function(){var e=document.documentElement;"
+        "var m=Math.max(0,(e.scrollHeight||0)-(window.innerHeight||0));"
+        "window.scrollTo(0,m*%1);})();").arg(qBound(0.0, fraction, 1.0));
+    // ApplicationWorld, not the main world: page JavaScript is disabled for
+    // safety, and an isolated world still runs (and shares the DOM) while a
+    // document's own scripts stay blocked.
+    m_view->page()->runJavaScript(js, QWebEngineScript::ApplicationWorld);
+#else
+    Q_UNUSED(fraction);
 #endif
 }
 

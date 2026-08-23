@@ -53,6 +53,33 @@ is disabled, and a profile-level request interceptor permits only local
 GFM while preventing a document from loading remote subresources when its
 preview opens.
 
+## Scroll lock
+
+The padlock in the top bar ties the editor and the rendered preview together.
+Both directions are proportional: the editor's scrollbar position is mapped to
+a 0..1 fraction and applied to the page, and `scrollPositionChanged` maps back
+the other way.
+
+Driving the page is the interesting part. Page JavaScript is disabled for
+safety, so `runJavaScript()` in the main world is refused — but an isolated
+world still executes and shares the DOM, so the scroll is issued in
+`QWebEngineScript::ApplicationWorld`. A document's own `<script>` stays inert
+while our sync script works.
+
+Bidirectional sync needs echo suppression or the two panes drive each other in
+a loop. A single `scrollTo` can emit several `scrollPositionChanged` events, so
+a one-shot flag is not enough: the tail of our own scroll would read as user
+input. Instead the widget remembers the fraction it last drove and ignores
+notifications within a small epsilon of it.
+
+Because the mapping is proportional rather than line-anchored, the two panes
+can drift by roughly a section on long documents — source lines and rendered
+blocks do not have proportional heights. Exact sync would need per-block
+anchors injected into the HTML.
+
+Note that `runJavaScript()` crashes under the `offscreen` platform plugin, so
+the scroll test skips there and needs a real or virtual display.
+
 ## Debouncing
 
 Two independent debounce timers exist because they guard different costs:

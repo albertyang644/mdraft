@@ -20,6 +20,8 @@ destroyed when closed.
   button for filesystems where watching does not work.
 - **Preview on demand.** `QWebEngineView` does not exist at startup or while
   the preview is closed. Opening it renders the current buffer through Pandoc.
+- **Scroll lock.** A padlock beside the preview toggle keeps the editor and
+  the rendered preview scrolling together, in either direction.
 - **Defensive preview.** JavaScript is disabled and remote subresources are
   blocked, so raw HTML in a document cannot phone home when previewed.
 - **Durable autosave.** Named documents are replaced atomically, external
@@ -100,6 +102,7 @@ Multiple files open as tabs.
 | Reload current file from disk | `F5` |
 | Toggle outline/DIR panel | `Ctrl+1` |
 | Toggle rendered preview | `Ctrl+3` |
+| Scroll lock (editor ↔ preview) | padlock in the top bar |
 | Toggle light/dark mode | `Ctrl+D` |
 | Bold / italic | `Ctrl+B` / `Ctrl+I` |
 | Increase / decrease editor font | `Ctrl++` / `Ctrl+-` |

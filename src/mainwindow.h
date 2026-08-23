@@ -110,6 +110,12 @@ private:
     bool reloadEditorFromDisk(MarkdownEditor *ed);
     void reloadFromDisk(); // F5
 
+    // Scroll lock: when engaged, the editor and the rendered preview scroll
+    // in lockstep (proportionally).
+    void setScrollLocked(bool locked);
+    void syncPreviewToEditor();
+    void connectEditorScroll(MarkdownEditor *editor);
+
     QSplitter *m_splitter;
     ShutterPanel *m_leftShutter;
     ShutterPanel *m_rightShutter;
@@ -130,6 +136,7 @@ private:
     QWidget *m_topBar;
     QPushButton *m_leftToggleBtn;
     QPushButton *m_rightToggleBtn;
+    QPushButton *m_scrollLockBtn;
     QLabel *m_topFileLabel;
     QTimer *m_previewDebounce;
     QFileSystemWatcher *m_docWatcher;
@@ -137,6 +144,8 @@ private:
 
     QString m_currentFile;
     bool m_darkMode;
+    bool m_scrollLocked;
+    bool m_syncingScroll;
 
     QAction *m_undoAction;
     QAction *m_redoAction;

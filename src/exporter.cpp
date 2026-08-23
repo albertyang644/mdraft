@@ -12,6 +12,30 @@
 #include <QTemporaryFile>
 #include <QTimer>
 
+namespace {
+
+// Pandoc's pdflatex template handles most Unicode punctuation, but leaves a
+// number of common mathematical characters unchanged.  pdflatex then rejects
+// those code points unless they are explicitly mapped to LaTeX math commands.
+// Keep the source text intact and teach the generated document how to render
+// the symbols instead of silently replacing or dropping them.
+const QString kPdfUnicodeHeader = QStringLiteral(
+    "\\DeclareUnicodeCharacter{2248}{\\ensuremath{\\approx}}"
+    "\\DeclareUnicodeCharacter{2260}{\\ensuremath{\\neq}}"
+    "\\DeclareUnicodeCharacter{2264}{\\ensuremath{\\leq}}"
+    "\\DeclareUnicodeCharacter{2265}{\\ensuremath{\\geq}}"
+    "\\DeclareUnicodeCharacter{2213}{\\ensuremath{\\mp}}"
+    "\\DeclareUnicodeCharacter{221E}{\\ensuremath{\\infty}}"
+    "\\DeclareUnicodeCharacter{2194}{\\ensuremath{\\leftrightarrow}}"
+    "\\DeclareUnicodeCharacter{03C0}{\\ensuremath{\\pi}}"
+    "\\DeclareUnicodeCharacter{221A}{\\ensuremath{\\surd}}"
+    "\\DeclareUnicodeCharacter{2211}{\\ensuremath{\\sum}}"
+    "\\DeclareUnicodeCharacter{2206}{\\ensuremath{\\Delta}}"
+    "\\DeclareUnicodeCharacter{0394}{\\ensuremath{\\Delta}}"
+    "\\DeclareUnicodeCharacter{03A9}{\\ensuremath{\\Omega}}");
+
+} // namespace
+
 void Exporter::exportMarkdown(const QString &markdown, const QString &dstPath,
                               const QString &format, QObject *context,
                               Completion completion)
@@ -115,7 +139,9 @@ void Exporter::exportMarkdown(const QString &markdown, const QString &dstPath,
     if (format == "html")
         args << "--to=html";
     else if (format == "pdf")
-        args << "--pdf-engine=pdflatex" << "--output" << temporaryOutput;
+        args << "--pdf-engine=pdflatex"
+             << "--variable" << QStringLiteral("header-includes=%1").arg(kPdfUnicodeHeader)
+             << "--output" << temporaryOutput;
     else
         args << "--to=latex" << "--output" << temporaryOutput;
 

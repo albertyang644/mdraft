@@ -44,6 +44,8 @@
 - [x] "Open with" from a file manager (positional CLI argument).
 - [x] DIR listing follows the directory via `QFileSystemWatcher`, plus an
   explicit refresh button for filesystems where watching silently does nothing.
+- [x] Scroll lock between the editor and the rendered preview, driven from an
+  isolated script world so page JavaScript stays disabled.
 - [x] External-change reconciliation with Notepad++ semantics: watch open
   files, offer to reload when one changes underneath you, and treat declining
   as "keep mine" so the document can still be saved and closed. `F5` reloads

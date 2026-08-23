@@ -5,6 +5,7 @@
 #include <QChildEvent>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QGuiApplication>
 
 #ifdef MDRAFT_HAVE_WEBENGINE
 #include <QHostAddress>
@@ -45,6 +46,7 @@ private slots:
     void remoteSubresourcesAreBlocked();
     void crashedPandocCompletesOnce();
     void latestSourceWinsConversionRace();
+    void scrollsWithJavascriptDisabled();
 };
 
 void PreviewLifecycleTest::previewStartsClosed()
@@ -209,6 +211,48 @@ void PreviewLifecycleTest::latestSourceWinsConversionRace()
     preview.setMarkdown("A");
     QTest::qWait(700);
     QCOMPARE(preview.m_lastRenderedSource, QString("A"));
+#else
+    QSKIP("WebEngine not compiled in this build");
+#endif
+}
+
+void PreviewLifecycleTest::scrollsWithJavascriptDisabled()
+{
+#ifdef MDRAFT_HAVE_WEBENGINE
+    // QWebEnginePage::runJavaScript crashes inside the "offscreen" platform
+    // plugin, so this one needs a real (or virtual) display to run.
+    if (QGuiApplication::platformName() == QLatin1String("offscreen"))
+        QSKIP("runJavaScript is not usable under the offscreen platform plugin");
+
+    QTemporaryDir dir;
+    const QString executable = dir.filePath("pandoc");
+    QFile script(executable);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    // Emit a page far taller than the viewport so there is scroll range.
+    script.write("#!/bin/sh\ncat >/dev/null\n"
+                 "printf '<div style=\"height:6000px\">tall</div>'\n");
+    script.close();
+    QVERIFY(script.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                  | QFileDevice::ExeOwner));
+    ScopedPath path(dir.path());
+
+    PreviewWidget preview;
+    preview.resize(400, 300);
+    preview.show();
+    preview.setMarkdown("tall document");
+    preview.openPreview();
+
+    auto *view = preview.findChild<QWebEngineView *>();
+    QVERIFY(view);
+    // Page JavaScript stays off; scrolling is driven from an isolated world.
+    QVERIFY(!view->settings()->testAttribute(QWebEngineSettings::JavascriptEnabled));
+
+    QSignalSpy loads(view, &QWebEngineView::loadFinished);
+    QTRY_VERIFY_WITH_TIMEOUT(!loads.isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(view->page()->contentsSize().height() > 1000, 5000);
+
+    preview.setScrollFraction(0.5);
+    QTRY_VERIFY_WITH_TIMEOUT(view->page()->scrollPosition().y() > 100, 5000);
 #else
     QSKIP("WebEngine not compiled in this build");
 #endif

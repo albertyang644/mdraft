@@ -35,6 +35,7 @@
 #include <QTabBar>
 #include <QCloseEvent>
 #include <QDir>
+#include <QScrollBar>
 #include <cmath>
 
 namespace {
@@ -100,6 +101,28 @@ QIcon makeMoonIcon(const QColor &color)
     p.end();
     return QIcon(pm);
 }
+// Padlock glyph. The shackle lifts and shifts right when unlocked, so the
+// two states differ in silhouette rather than only in colour.
+QIcon makeLockIcon(bool locked, const QColor &color)
+{
+    QPixmap pm(16, 16);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    p.setPen(QPen(color, 1.5));
+    p.setBrush(Qt::NoBrush);
+    if (locked)
+        p.drawArc(QRectF(4.5, 2.0, 7.0, 8.0), 0, 180 * 16);
+    else
+        p.drawArc(QRectF(7.5, 1.0, 7.0, 8.0), 20 * 16, 160 * 16);
+
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawRoundedRect(QRectF(3.0, 7.5, 10.0, 7.0), 1.6, 1.6);
+    p.end();
+    return QIcon(pm);
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -121,10 +144,13 @@ MainWindow::MainWindow(QWidget *parent)
     , m_topBar(nullptr)
     , m_leftToggleBtn(nullptr)
     , m_rightToggleBtn(nullptr)
+    , m_scrollLockBtn(nullptr)
     , m_topFileLabel(nullptr)
     , m_previewDebounce(nullptr)
     , m_docWatcher(nullptr)
     , m_darkMode(false)
+    , m_scrollLocked(false)
+    , m_syncingScroll(false)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
     , m_cutAction(nullptr)
@@ -219,6 +245,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightShutter, &ShutterPanel::closed, this, [this]() {
         m_preview->teardownPreview();
     });
+
+    // Preview -> editor half of the scroll lock.
+    connect(m_preview, &PreviewWidget::scrolled, this, [this](qreal fraction) {
+        if (!m_scrollLocked || m_syncingScroll || !m_editor)
+            return;
+        QScrollBar *bar = m_editor->verticalScrollBar();
+        if (!bar || bar->maximum() <= bar->minimum())
+            return;
+        m_syncingScroll = true;
+        bar->setValue(bar->minimum()
+                      + qRound(fraction * (bar->maximum() - bar->minimum())));
+        m_syncingScroll = false;
+    });
     // Closing occurs after lifecycle signals are connected. No WebView has
     // been created, and no setting may override this startup invariant.
     m_rightShutter->setOpen(false);
@@ -248,6 +287,10 @@ MainWindow::MainWindow(QWidget *parent)
     // Light/Dark remembers whichever side was last picked, same as the
     // Outline/DIR toggle.
     applyDarkMode(settings.value("darkMode", false).toBool(), false);
+
+    // Scroll lock is remembered too; setChecked drives setScrollLocked().
+    m_scrollLockBtn->setChecked(settings.value("scrollLock", false).toBool());
+    applyTopBarTheme(); // paint the padlock for the restored state
 
     // Keyboard toggles for the panels are the Ctrl+1 / Ctrl+3 shortcuts
     // already attached to the View menu actions above.
@@ -357,6 +400,7 @@ MarkdownEditor *MainWindow::createEditorTab(const QString &path, const QString &
     const int idx = m_editorTabs->addTab(editor, label);
     m_editorTabs->setTabToolTip(idx, path);
     watchDocument(editor);
+    connectEditorScroll(editor);
     m_editorTabs->setCurrentIndex(idx); // triggers onTabChanged -> syncActiveTabUi
     return editor;
 }
@@ -430,6 +474,43 @@ bool MainWindow::flushAutosave(MarkdownEditor *ed, bool reportError)
     if (path.isEmpty())
         return false;
     return saveEditorToPath(ed, path, reportError, true);
+}
+
+void MainWindow::setScrollLocked(bool locked)
+{
+    if (m_scrollLocked == locked) {
+        applyTopBarTheme(); // still refresh the glyph on the initial restore
+        return;
+    }
+    m_scrollLocked = locked;
+    QSettings().setValue("scrollLock", locked);
+    applyTopBarTheme();
+    if (locked)
+        syncPreviewToEditor(); // adopt the editor's position immediately
+}
+
+void MainWindow::syncPreviewToEditor()
+{
+    if (!m_scrollLocked || m_syncingScroll || !m_editor || !m_preview->isPreviewOpen())
+        return;
+    const QScrollBar *bar = m_editor->verticalScrollBar();
+    if (!bar || bar->maximum() <= bar->minimum())
+        return;
+    const qreal fraction = qreal(bar->value() - bar->minimum())
+                         / qreal(bar->maximum() - bar->minimum());
+    m_syncingScroll = true;
+    m_preview->setScrollFraction(fraction);
+    m_syncingScroll = false;
+}
+
+void MainWindow::connectEditorScroll(MarkdownEditor *editor)
+{
+    if (!editor)
+        return;
+    connect(editor->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, editor]() {
+        if (editor == m_editor)
+            syncPreviewToEditor();
+    });
 }
 
 void MainWindow::watchDocument(MarkdownEditor *ed)
@@ -746,8 +827,16 @@ void MainWindow::createTopBar()
     m_rightToggleBtn->setToolTip(tr("Toggle preview panel (Ctrl+3)"));
     connect(m_rightToggleBtn, &QPushButton::clicked, this, &MainWindow::toggleRightPanel);
 
+    m_scrollLockBtn = new QPushButton(m_topBar);
+    m_scrollLockBtn->setCheckable(true);
+    m_scrollLockBtn->setFlat(true);
+    m_scrollLockBtn->setFixedSize(28, 24);
+    m_scrollLockBtn->setCursor(Qt::PointingHandCursor);
+    connect(m_scrollLockBtn, &QPushButton::toggled, this, &MainWindow::setScrollLocked);
+
     layout->addWidget(m_leftToggleBtn, 0, Qt::AlignLeft);
     layout->addWidget(m_topFileLabel, 1);
+    layout->addWidget(m_scrollLockBtn, 0, Qt::AlignRight);
     layout->addWidget(m_rightToggleBtn, 0, Qt::AlignRight);
 
     applyTopBarTheme();
@@ -765,6 +854,16 @@ void MainWindow::applyTopBarTheme()
         QString("QWidget#topBar { background:%1; border-bottom:1px solid %2; }").arg(bg, border));
     m_topFileLabel->setStyleSheet(
         QString("font-weight:600; color:%1;").arg(m_darkMode ? Theme::DarkTopText : Theme::LightText));
+
+    if (m_scrollLockBtn) {
+        const QColor iconColor(m_scrollLocked
+                                   ? (m_darkMode ? Theme::AccentBright : Theme::AccentDark)
+                                   : (m_darkMode ? Theme::DirDarkText : Theme::DirLightText));
+        m_scrollLockBtn->setIcon(makeLockIcon(m_scrollLocked, iconColor));
+        m_scrollLockBtn->setToolTip(m_scrollLocked
+            ? tr("Scroll lock on: the editor and preview scroll together")
+            : tr("Scroll lock off: the editor and preview scroll independently"));
+    }
 }
 
 void MainWindow::createStatusBar()

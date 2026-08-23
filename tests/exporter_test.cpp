@@ -16,6 +16,7 @@ class ExporterTest : public QObject
 private slots:
     void exportsCurrentBufferAsStandaloneGfmHtml();
     void usesGfmForLatex();
+    void exportsCommonUnicodeMathToPdf();
     void conversionDoesNotBlockEventLoop();
     void reportsPandocFailure();
 };
@@ -68,6 +69,36 @@ void ExporterTest::usesGfmForLatex()
     QFile file(output);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QVERIFY(file.readAll().contains("\\href{http://www.example.com}{www.example.com}"));
+}
+
+void ExporterTest::exportsCommonUnicodeMathToPdf()
+{
+    if (QStandardPaths::findExecutable("pandoc").isEmpty()
+        || QStandardPaths::findExecutable("pdflatex").isEmpty()) {
+        QSKIP("pandoc and pdflatex are required");
+    }
+
+    QTemporaryDir dir;
+    const QString output = dir.filePath("unicode-math.pdf");
+    QEventLoop loop;
+    bool ok = false;
+    QString error;
+    const QString markdown = QString::fromUtf8(
+        "Tyler comp: 794.9k ÷ 6,126 sq ft ≈ 129.76\n"
+        "Common comparisons: ≠ ≤ ≥\n");
+
+    Exporter::exportMarkdown(markdown, output, "pdf", this,
+        [&](bool succeeded, const QString &message) {
+            ok = succeeded;
+            error = message;
+            loop.quit();
+        });
+    loop.exec();
+
+    QVERIFY2(ok, qPrintable(error));
+    QFileInfo pdf(output);
+    QVERIFY(pdf.exists());
+    QVERIFY(pdf.size() > 0);
 }
 
 void ExporterTest::conversionDoesNotBlockEventLoop()
