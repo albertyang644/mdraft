@@ -9,6 +9,12 @@ start a WebView or browser-backed rendered preview during initial app launch.
 
 The app must open first as a fast native Markdown editor.
 
+Exception (explicit user opt-in): Edit > Settings > "Always launch with the
+preview panel loaded" is off by default. When enabled, the preview panel is
+opened by the normal open-panel path after the window has been constructed and
+the event loop is running, never during MainWindow construction.
+Checkbox exception but must be explicit
+
 ## Preview Lifecycle
 
 - The rendered preview is load-on-open only.

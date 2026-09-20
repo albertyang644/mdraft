@@ -17,6 +17,13 @@
 #include <QLabel>
 #include <QMimeData>
 #include <QPushButton>
+#include <QLineEdit>
+#include <QTextEdit>
+#include <QTextBlock>
+#include <QShortcut>
+#include <QPrinter>
+#include <QPrintDialog>
+#include <QTextDocument>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QTextStream>
@@ -36,7 +43,10 @@
 #include <QCloseEvent>
 #include <QDir>
 #include <QScrollBar>
+#include <QDockWidget>
+#include <QMouseEvent>
 #include <cmath>
+#include <functional>
 
 namespace {
 // A small "toggle sidebar" glyph: an outlined rect with a vertical divider,
@@ -125,6 +135,63 @@ QIcon makeLockIcon(bool locked, const QColor &color)
 }
 } // namespace
 
+// A deliberately lightweight document map: rendering a second, tiny native
+// text view keeps it responsive even for large notes, while a click maps back
+// to the corresponding editor line.
+class OverviewMap final : public QPlainTextEdit
+{
+public:
+    explicit OverviewMap(QWidget *parent = nullptr) : QPlainTextEdit(parent)
+    {
+        setReadOnly(true);
+        setLineWrapMode(QPlainTextEdit::NoWrap);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setTextInteractionFlags(Qt::NoTextInteraction);
+        QFont mapFont = font();
+        mapFont.setPointSize(3);
+        setFont(mapFont);
+        setToolTip(tr("Document overview — click or drag to jump"));
+    }
+
+    void setNavigateCallback(std::function<void(int)> callback)
+    {
+        m_navigate = std::move(callback);
+    }
+
+    void setActiveBlock(int block)
+    {
+        QTextBlock textBlock = document()->findBlockByNumber(block);
+        if (!textBlock.isValid())
+            return;
+        QTextEdit::ExtraSelection highlight;
+        highlight.cursor = QTextCursor(textBlock);
+        highlight.format.setBackground(QColor(Theme::Accent));
+        highlight.format.setProperty(QTextFormat::FullWidthSelection, true);
+        setExtraSelections({highlight});
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override { navigate(event->position().y()); }
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if (event->buttons() & Qt::LeftButton)
+            navigate(event->position().y());
+    }
+
+private:
+    void navigate(qreal y)
+    {
+        if (!m_navigate || document()->blockCount() == 0)
+            return;
+        const qreal fraction = qBound<qreal>(0.0, y / qMax(1, viewport()->height()), 1.0);
+        m_navigate(qMin(document()->blockCount() - 1,
+                        qRound(fraction * (document()->blockCount() - 1))));
+    }
+
+    std::function<void(int)> m_navigate;
+};
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_splitter(nullptr)
@@ -135,6 +202,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_editorTabs(nullptr)
     , m_editor(nullptr)
     , m_preview(nullptr)
+    , m_overview(nullptr)
     , m_wordLabel(nullptr)
     , m_charLabel(nullptr)
     , m_fileLabel(nullptr)
@@ -142,15 +210,25 @@ MainWindow::MainWindow(QWidget *parent)
     , m_moonLabel(nullptr)
     , m_modeToggle(nullptr)
     , m_topBar(nullptr)
+    , m_findBar(nullptr)
     , m_leftToggleBtn(nullptr)
     , m_rightToggleBtn(nullptr)
     , m_scrollLockBtn(nullptr)
     , m_topFileLabel(nullptr)
+    , m_findEdit(nullptr)
+    , m_replaceEdit(nullptr)
+    , m_findCountLabel(nullptr)
+    , m_replaceToggleBtn(nullptr)
+    , m_replaceBtn(nullptr)
+    , m_replaceAllBtn(nullptr)
     , m_previewDebounce(nullptr)
     , m_docWatcher(nullptr)
     , m_darkMode(false)
     , m_scrollLocked(false)
+    , m_autoReload(false)
     , m_syncingScroll(false)
+    , m_launchPreviewAction(nullptr)
+    , m_autoReloadAction(nullptr)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
     , m_cutAction(nullptr)
@@ -205,8 +283,27 @@ MainWindow::MainWindow(QWidget *parent)
     centralLayout->setSpacing(0);
     createTopBar();
     centralLayout->addWidget(m_topBar);
+    centralLayout->addWidget(m_findBar);
     centralLayout->addWidget(m_splitter, 1);
     setCentralWidget(central);
+
+    // Keep the overview visible even when the rendered preview is closed.
+    // It is a navigation aid, not a second preview.
+    auto *overviewDock = new QDockWidget(tr("Overview"), this);
+    overviewDock->setObjectName("overviewDock");
+    overviewDock->setAllowedAreas(Qt::RightDockWidgetArea);
+    overviewDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
+    m_overview = new OverviewMap(overviewDock);
+    m_overview->setObjectName("overviewMap");
+    m_overview->setMinimumWidth(92);
+    m_overview->setMaximumWidth(130);
+    overviewDock->setWidget(m_overview);
+    addDockWidget(Qt::RightDockWidgetArea, overviewDock);
+    resizeDocks({overviewDock}, {108}, Qt::Horizontal);
+    m_overview->setNavigateCallback([this](int block) {
+        if (m_editor)
+            m_editor->goToLine(block);
+    });
 
     // --- Wire outline navigation ---
     connect(m_leftPanel, &LeftPanel::goToBlock, this, [this](int block) {
@@ -291,6 +388,14 @@ MainWindow::MainWindow(QWidget *parent)
     // Scroll lock is remembered too; setChecked drives setScrollLocked().
     m_scrollLockBtn->setChecked(settings.value("scrollLock", false).toBool());
     applyTopBarTheme(); // paint the padlock for the restored state
+
+    m_autoReload = settings.value("autoReloadExternal", false).toBool();
+    m_autoReloadAction->setChecked(m_autoReload);
+    m_launchPreviewAction->setChecked(settings.value("launchWithPreview", false).toBool());
+    // Opt-in only. Deferred to the event loop so the window is constructed
+    // and shown as a native editor first; the WebView never delays startup.
+    if (m_launchPreviewAction->isChecked())
+        QTimer::singleShot(0, this, [this]() { m_rightShutter->setOpen(true); });
 
     // Keyboard toggles for the panels are the Ctrl+1 / Ctrl+3 shortcuts
     // already attached to the View menu actions above.
@@ -379,6 +484,8 @@ MarkdownEditor *MainWindow::createEditorTab(const QString &path, const QString &
             autosaveTimer->start();
         if (editor != m_editor)
             return;
+        updateFindMatchCount();
+        updateOverviewMap();
         updateStats();
         refreshOutline();
         m_previewDebounce->start();
@@ -508,8 +615,13 @@ void MainWindow::connectEditorScroll(MarkdownEditor *editor)
     if (!editor)
         return;
     connect(editor->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, editor]() {
-        if (editor == m_editor)
+        if (editor == m_editor) {
             syncPreviewToEditor();
+            if (m_overview) {
+                const QTextCursor firstVisible = editor->cursorForPosition(QPoint(0, 0));
+                m_overview->setActiveBlock(firstVisible.blockNumber());
+            }
+        }
     });
 }
 
@@ -565,6 +677,12 @@ void MainWindow::onWatchedFileChanged(const QString &path)
 
     if (!document.changedOnDisk())
         return; // our own save, or a no-op touch
+
+    // Hands-off mode still never discards unsaved edits: a dirty buffer asks.
+    if (m_autoReload && !ed->document()->isModified()) {
+        reloadEditorFromDisk(ed);
+        return;
+    }
 
     promptReload(ed);
 }
@@ -700,6 +818,8 @@ void MainWindow::syncActiveTabUi()
     m_leftPanel->setCurrentFilePath(m_currentFile);
 
     updateStats();
+    updateFindMatchCount();
+    updateOverviewMap();
     refreshOutline();
     updatePreview();
     updateEditActions();
@@ -754,6 +874,8 @@ void MainWindow::createMenus()
     fileMenu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::saveFile);
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveFileAs);
     fileMenu->addSeparator();
+    fileMenu->addAction(tr("&Print…"), QKeySequence::Print, this, &MainWindow::printDocument);
+    fileMenu->addSeparator();
     QMenu *exportMenu = fileMenu->addMenu(tr("E&xport"));
     exportMenu->addAction(tr("Export &HTML…"), this, &MainWindow::exportHtml);
     exportMenu->addAction(tr("Export &PDF…"), this, &MainWindow::exportPdf);
@@ -773,6 +895,23 @@ void MainWindow::createMenus()
     m_copyAction = editMenu->addAction(tr("&Copy"), QKeySequence::Copy, this, [this]() { m_editor->copy(); });
     m_pasteAction = editMenu->addAction(tr("&Paste"), QKeySequence::Paste, this, [this]() { m_editor->paste(); });
     m_selectAllAction = editMenu->addAction(tr("Select &All"), QKeySequence::SelectAll, this, [this]() { m_editor->selectAll(); });
+    editMenu->addSeparator();
+    editMenu->addAction(tr("&Find"), QKeySequence::Find, this, &MainWindow::showFindBar);
+    editMenu->addAction(tr("&Replace"), QKeySequence::Replace, this, &MainWindow::showReplaceBar);
+    editMenu->addSeparator();
+    QMenu *settingsMenu = editMenu->addMenu(tr("Se&ttings"));
+    m_launchPreviewAction = settingsMenu->addAction(tr("Always launch with the &preview panel loaded"));
+    m_launchPreviewAction->setCheckable(true);
+    connect(m_launchPreviewAction, &QAction::toggled, this, [](bool on) {
+        QSettings().setValue("launchWithPreview", on);
+    });
+    m_autoReloadAction = settingsMenu->addAction(tr("Load &new updates to files without asking"));
+    m_autoReloadAction->setCheckable(true);
+    m_autoReloadAction->setToolTip(tr("Files with unsaved edits here still ask first"));
+    connect(m_autoReloadAction, &QAction::toggled, this, [this](bool on) {
+        m_autoReload = on;
+        QSettings().setValue("autoReloadExternal", on);
+    });
     connect(QApplication::clipboard(), &QClipboard::dataChanged,
             this, &MainWindow::updateEditActions);
 
@@ -840,6 +979,78 @@ void MainWindow::createTopBar()
     layout->addWidget(m_rightToggleBtn, 0, Qt::AlignRight);
 
     applyTopBarTheme();
+
+    // This deliberately lives directly under the title strip rather than in
+    // a floating dialog: it keeps the document visible while searching.
+    m_findBar = new QWidget(this);
+    m_findBar->setObjectName("findBar");
+    m_findBar->setFixedHeight(34);
+    auto *findLayout = new QHBoxLayout(m_findBar);
+    findLayout->setContentsMargins(8, 3, 8, 3);
+    findLayout->setSpacing(5);
+
+    m_findEdit = new QLineEdit(m_findBar);
+    m_findEdit->setObjectName("findEdit");
+    m_findEdit->setPlaceholderText(tr("Find"));
+    m_findEdit->setClearButtonEnabled(true);
+    m_findEdit->setMinimumWidth(180);
+    m_findCountLabel = new QLabel(m_findBar);
+    m_findCountLabel->setObjectName("findCountLabel");
+    m_findCountLabel->setMinimumWidth(70);
+
+    auto *previous = new QPushButton(tr("Prev"), m_findBar);
+    previous->setToolTip(tr("Previous match (Shift+Enter)"));
+    auto *next = new QPushButton(tr("Next"), m_findBar);
+    next->setToolTip(tr("Next match (Enter)"));
+    m_replaceToggleBtn = new QPushButton(tr("Replace"), m_findBar);
+    m_replaceToggleBtn->setCheckable(true);
+    m_replaceEdit = new QLineEdit(m_findBar);
+    m_replaceEdit->setObjectName("replaceEdit");
+    m_replaceEdit->setPlaceholderText(tr("Replace with"));
+    m_replaceEdit->setMinimumWidth(160);
+    m_replaceBtn = new QPushButton(tr("Replace"), m_findBar);
+    m_replaceAllBtn = new QPushButton(tr("All"), m_findBar);
+    auto *close = new QPushButton(QString::fromUtf8("×"), m_findBar);
+    close->setObjectName("findCloseButton");
+    close->setToolTip(tr("Close find bar (Esc)"));
+    close->setFixedWidth(26);
+
+    findLayout->addWidget(m_findEdit);
+    findLayout->addWidget(m_findCountLabel);
+    findLayout->addWidget(previous);
+    findLayout->addWidget(next);
+    findLayout->addWidget(m_replaceToggleBtn);
+    findLayout->addWidget(m_replaceEdit);
+    findLayout->addWidget(m_replaceBtn);
+    findLayout->addWidget(m_replaceAllBtn);
+    findLayout->addStretch();
+    findLayout->addWidget(close);
+
+    const auto setReplaceVisible = [this](bool visible) {
+        m_replaceEdit->setVisible(visible);
+        m_replaceBtn->setVisible(visible);
+        m_replaceAllBtn->setVisible(visible);
+    };
+    setReplaceVisible(false);
+    m_findBar->hide();
+
+    connect(m_findEdit, &QLineEdit::textChanged, this, [this]() {
+        updateFindMatchCount();
+        if (!m_findEdit->text().isEmpty())
+            findNext();
+    });
+    connect(m_findEdit, &QLineEdit::returnPressed, this, &MainWindow::findNext);
+    connect(m_findEdit, &QLineEdit::editingFinished, this, &MainWindow::updateFindMatchCount);
+    auto *previousShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Return), m_findEdit);
+    connect(previousShortcut, &QShortcut::activated, this, &MainWindow::findPrevious);
+    auto *closeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(closeShortcut, &QShortcut::activated, this, &MainWindow::hideFindBar);
+    connect(previous, &QPushButton::clicked, this, &MainWindow::findPrevious);
+    connect(next, &QPushButton::clicked, this, &MainWindow::findNext);
+    connect(m_replaceToggleBtn, &QPushButton::toggled, this, setReplaceVisible);
+    connect(m_replaceBtn, &QPushButton::clicked, this, &MainWindow::replaceCurrent);
+    connect(m_replaceAllBtn, &QPushButton::clicked, this, &MainWindow::replaceAll);
+    connect(close, &QPushButton::clicked, this, &MainWindow::hideFindBar);
 }
 
 void MainWindow::applyTopBarTheme()
@@ -852,6 +1063,13 @@ void MainWindow::applyTopBarTheme()
     const QString border = m_darkMode ? Theme::DarkBorder : Theme::LightBorder;
     m_topBar->setStyleSheet(
         QString("QWidget#topBar { background:%1; border-bottom:1px solid %2; }").arg(bg, border));
+    if (m_findBar) {
+        m_findBar->setStyleSheet(QString(
+            "QWidget#findBar { background:%1; border-bottom:1px solid %2; }"
+            "QLineEdit { background:%3; color:%4; border:1px solid %2; padding:2px 5px; }")
+            .arg(bg, border, m_darkMode ? Theme::DarkEditor : QStringLiteral("white"),
+                 m_darkMode ? Theme::DarkText : Theme::LightText));
+    }
     m_topFileLabel->setStyleSheet(
         QString("font-weight:600; color:%1;").arg(m_darkMode ? Theme::DarkTopText : Theme::LightText));
 
@@ -956,6 +1174,119 @@ void MainWindow::updateEditActions()
     m_copyAction->setEnabled(hasSelection);
     m_pasteAction->setEnabled(hasEditor && clipboardData && clipboardData->hasText());
     m_selectAllAction->setEnabled(hasEditor && !m_editor->document()->isEmpty());
+}
+
+// ---------------------------------------------------------------------------
+// Find + replace
+// ---------------------------------------------------------------------------
+
+void MainWindow::showFindBar()
+{
+    m_findBar->show();
+    m_findEdit->setFocus();
+    m_findEdit->selectAll();
+    updateFindMatchCount();
+}
+
+void MainWindow::showReplaceBar()
+{
+    showFindBar();
+    m_replaceToggleBtn->setChecked(true);
+    m_replaceEdit->setFocus();
+}
+
+void MainWindow::hideFindBar()
+{
+    m_findBar->hide();
+    if (m_editor)
+        m_editor->setFocus();
+}
+
+void MainWindow::updateFindMatchCount()
+{
+    const QString needle = m_findEdit->text();
+    if (!m_editor || needle.isEmpty()) {
+        m_findCountLabel->setText(needle.isEmpty() ? QString() : tr("0 matches"));
+        return;
+    }
+    int matches = 0;
+    QTextCursor cursor(m_editor->document());
+    while (true) {
+        cursor = m_editor->document()->find(needle, cursor);
+        if (cursor.isNull())
+            break;
+        ++matches;
+    }
+    m_findCountLabel->setText(matches == 1 ? tr("1 match") : tr("%1 matches").arg(matches));
+}
+
+void MainWindow::find(bool backwards)
+{
+    if (!m_editor || m_findEdit->text().isEmpty())
+        return;
+    const QTextDocument::FindFlags flags = backwards ? QTextDocument::FindBackward
+                                                       : QTextDocument::FindFlags();
+    QTextCursor start = m_editor->textCursor();
+    if (start.hasSelection())
+        start.setPosition(backwards ? start.selectionStart() : start.selectionEnd());
+    QTextCursor match = m_editor->document()->find(m_findEdit->text(), start, flags);
+    if (match.isNull()) {
+        QTextCursor wrap(m_editor->document());
+        wrap.movePosition(backwards ? QTextCursor::End : QTextCursor::Start);
+        match = m_editor->document()->find(m_findEdit->text(), wrap, flags);
+    }
+    if (match.isNull()) {
+        m_findCountLabel->setText(tr("0 matches"));
+        return;
+    }
+    m_editor->setTextCursor(match);
+    m_editor->centerCursor();
+}
+
+void MainWindow::findNext() { find(false); }
+void MainWindow::findPrevious() { find(true); }
+
+void MainWindow::replaceCurrent()
+{
+    if (!m_editor || m_findEdit->text().isEmpty())
+        return;
+    QTextCursor cursor = m_editor->textCursor();
+    if (cursor.hasSelection()
+        && cursor.selectedText().compare(m_findEdit->text(), Qt::CaseInsensitive) == 0) {
+        cursor.insertText(m_replaceEdit->text());
+        m_editor->setTextCursor(cursor);
+    }
+    findNext();
+    updateFindMatchCount();
+}
+
+void MainWindow::replaceAll()
+{
+    if (!m_editor || m_findEdit->text().isEmpty())
+        return;
+    QTextCursor cursor(m_editor->document());
+    int replaced = 0;
+    cursor.beginEditBlock();
+    while (true) {
+        cursor = m_editor->document()->find(m_findEdit->text(), cursor);
+        if (cursor.isNull())
+            break;
+        cursor.insertText(m_replaceEdit->text());
+        ++replaced;
+    }
+    cursor.endEditBlock();
+    updateFindMatchCount();
+    statusBar()->showMessage(tr("Replaced %1 occurrence(s)").arg(replaced), 3000);
+}
+
+void MainWindow::updateOverviewMap()
+{
+    if (!m_overview || !m_editor)
+        return;
+    const QSignalBlocker blocker(m_overview);
+    m_overview->setPlainText(m_editor->toPlainText());
+    const QTextCursor firstVisible = m_editor->cursorForPosition(QPoint(0, 0));
+    m_overview->setActiveBlock(firstVisible.blockNumber());
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,6 +1400,26 @@ void MainWindow::exportLatex()
     exportDocument("latex", tr("Export LaTeX"), ".tex", tr("LaTeX (*.tex)"));
 }
 
+void MainWindow::printDocument()
+{
+    if (!m_editor)
+        return;
+    QPrinter printer(QPrinter::HighResolution);
+    QPrintDialog dialog(&printer, this);
+    dialog.setWindowTitle(tr("Print — mdraft"));
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    // Print the document's text directly. This preserves its line breaks and
+    // keeps printing available without requiring the optional web preview.
+    QTextDocument document;
+    document.setDefaultFont(m_editor->font());
+    document.setPlainText(m_editor->toPlainText());
+    document.print(&printer);
+    statusBar()->showMessage(tr("Sent document to printer."), 5000);
+    QMessageBox::information(this, tr("Print"), tr("Sent document to printer."));
+}
+
 void MainWindow::exportDocument(const QString &format, const QString &title,
                                 const QString &suffix, const QString &filter)
 {
@@ -1089,9 +1440,11 @@ void MainWindow::exportDocument(const QString &format, const QString &title,
     statusBar()->showMessage(tr("Exporting to %1…").arg(outPath));
     Exporter::exportMarkdown(currentMarkdown(), outPath, format, this,
         [this, outPath](bool ok, const QString &error) {
-            if (ok)
+            if (ok) {
                 statusBar()->showMessage(tr("Exported to %1").arg(outPath), 3000);
-            else
+                QMessageBox::information(this, tr("Export complete"),
+                    tr("Exported successfully to:\n%1").arg(outPath));
+            } else
                 QMessageBox::warning(this, tr("Export"), error);
         });
 }

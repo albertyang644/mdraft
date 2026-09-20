@@ -11,6 +11,7 @@
 class QSplitter;
 class QLabel;
 class QPushButton;
+class QLineEdit;
 class QPlainTextEdit;
 class QTabWidget;
 class MarkdownEditor;
@@ -22,6 +23,7 @@ class QTimer;
 class QFileSystemWatcher;
 class LeftPanel;
 class ToggleSwitch;
+class OverviewMap;
 
 class MainWindow : public QMainWindow
 {
@@ -48,6 +50,7 @@ private slots:
     void exportHtml();
     void exportPdf();
     void exportLatex();
+    void printDocument();
     // View
     void toggleLeftPanel();
     void toggleRightPanel();
@@ -59,6 +62,14 @@ private slots:
     void boldSelection();
     void italicSelection();
     void insertHeading(int level);
+    // Find / replace
+    void showFindBar();
+    void showReplaceBar();
+    void hideFindBar();
+    void findNext();
+    void findPrevious();
+    void replaceCurrent();
+    void replaceAll();
 
 private:
     void createMenus();
@@ -71,6 +82,9 @@ private:
     void updateStats();
     void updatePreview();
     void updateEditActions();
+    void updateFindMatchCount();
+    void updateOverviewMap();
+    void find(bool backwards);
     void exportDocument(const QString &format, const QString &title,
                         const QString &suffix, const QString &filter);
 
@@ -125,6 +139,7 @@ private:
     QPointer<MarkdownEditor> m_editor; // == active tab's editor
     QHash<MarkdownEditor *, DocumentFile> m_documents;
     PreviewWidget *m_preview;
+    OverviewMap *m_overview;
 
     QLabel *m_wordLabel;
     QLabel *m_charLabel;
@@ -134,10 +149,17 @@ private:
     ToggleSwitch *m_modeToggle;
 
     QWidget *m_topBar;
+    QWidget *m_findBar;
     QPushButton *m_leftToggleBtn;
     QPushButton *m_rightToggleBtn;
     QPushButton *m_scrollLockBtn;
     QLabel *m_topFileLabel;
+    QLineEdit *m_findEdit;
+    QLineEdit *m_replaceEdit;
+    QLabel *m_findCountLabel;
+    QPushButton *m_replaceToggleBtn;
+    QPushButton *m_replaceBtn;
+    QPushButton *m_replaceAllBtn;
     QTimer *m_previewDebounce;
     QFileSystemWatcher *m_docWatcher;
     QSet<MarkdownEditor *> m_reloadPromptOpen;
@@ -145,8 +167,11 @@ private:
     QString m_currentFile;
     bool m_darkMode;
     bool m_scrollLocked;
+    bool m_autoReload;
     bool m_syncingScroll;
 
+    QAction *m_launchPreviewAction;
+    QAction *m_autoReloadAction;
     QAction *m_undoAction;
     QAction *m_redoAction;
     QAction *m_cutAction;

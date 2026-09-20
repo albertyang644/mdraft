@@ -20,6 +20,9 @@ destroyed when closed.
   button for filesystems where watching does not work.
 - **Preview on demand.** `QWebEngineView` does not exist at startup or while
   the preview is closed. Opening it renders the current buffer through Pandoc.
+  Edit > Settings can opt in to opening it at launch (off by default), and to
+  reloading externally changed files without asking (files with unsaved edits
+  still ask).
 - **Scroll lock.** A padlock beside the preview toggle keeps the editor and
   the rendered preview scrolling together, in either direction.
 - **Defensive preview.** JavaScript is disabled and remote subresources are
