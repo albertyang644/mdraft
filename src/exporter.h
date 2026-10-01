@@ -7,7 +7,7 @@
 class QObject;
 
 /**
- * On-demand export to HTML, PDF and LaTeX.
+ * On-demand export to HTML, PDF, LaTeX and Word (docx).
  *
  * <HARD_CONTRACT> Export is invoked only by explicit user action and never
  * blocks the editing hot path. Tool detection (pandoc/latex) is cheap and

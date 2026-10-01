@@ -16,7 +16,7 @@ set(CMAKE_AUTORCC ON)
 add_compile_options("$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wall;-Wextra;-Wpedantic>")
 
 # Qt6 Core & Widgets (always required)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core PrintSupport)
 
 # Qt WebEngine is optional and used only for the on-demand preview.
 option(MDRAFT_ENABLE_WEBENGINE "Build with Qt WebEngine preview support" ON)
@@ -67,6 +67,7 @@ target_link_libraries(mdraft_core PUBLIC
     Qt6::Widgets
     Qt6::Gui
     Qt6::Core
+    Qt6::PrintSupport
 )
 
 if(MDRAFT_HAVE_WEBENGINE)

@@ -74,8 +74,8 @@ void ExporterTest::usesGfmForLatex()
 void ExporterTest::exportsCommonUnicodeMathToPdf()
 {
     if (QStandardPaths::findExecutable("pandoc").isEmpty()
-        || QStandardPaths::findExecutable("pdflatex").isEmpty()) {
-        QSKIP("pandoc and pdflatex are required");
+        || QStandardPaths::findExecutable("xelatex").isEmpty()) {
+        QSKIP("pandoc and xelatex are required");
     }
 
     QTemporaryDir dir;
@@ -85,7 +85,7 @@ void ExporterTest::exportsCommonUnicodeMathToPdf()
     QString error;
     const QString markdown = QString::fromUtf8(
         "Tyler comp: 794.9k ÷ 6,126 sq ft ≈ 129.76\n"
-        "Common comparisons: ≠ ≤ ≥\n");
+        "Common comparisons: ≠ ≤ ≥; warning: ⚠; status: 😀 🚀 ❤️\n");
 
     Exporter::exportMarkdown(markdown, output, "pdf", this,
         [&](bool succeeded, const QString &message) {

@@ -1,4 +1,5 @@
 build/
+build-off/
 tests/build/
 *.o
 *.moc

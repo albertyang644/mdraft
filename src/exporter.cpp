@@ -12,42 +12,20 @@
 #include <QTemporaryFile>
 #include <QTimer>
 
-namespace {
-
-// Pandoc's pdflatex template handles most Unicode punctuation, but leaves a
-// number of common mathematical characters unchanged.  pdflatex then rejects
-// those code points unless they are explicitly mapped to LaTeX math commands.
-// Keep the source text intact and teach the generated document how to render
-// the symbols instead of silently replacing or dropping them.
-const QString kPdfUnicodeHeader = QStringLiteral(
-    "\\DeclareUnicodeCharacter{2248}{\\ensuremath{\\approx}}"
-    "\\DeclareUnicodeCharacter{2260}{\\ensuremath{\\neq}}"
-    "\\DeclareUnicodeCharacter{2264}{\\ensuremath{\\leq}}"
-    "\\DeclareUnicodeCharacter{2265}{\\ensuremath{\\geq}}"
-    "\\DeclareUnicodeCharacter{2213}{\\ensuremath{\\mp}}"
-    "\\DeclareUnicodeCharacter{221E}{\\ensuremath{\\infty}}"
-    "\\DeclareUnicodeCharacter{2194}{\\ensuremath{\\leftrightarrow}}"
-    "\\DeclareUnicodeCharacter{03C0}{\\ensuremath{\\pi}}"
-    "\\DeclareUnicodeCharacter{221A}{\\ensuremath{\\surd}}"
-    "\\DeclareUnicodeCharacter{2211}{\\ensuremath{\\sum}}"
-    "\\DeclareUnicodeCharacter{2206}{\\ensuremath{\\Delta}}"
-    "\\DeclareUnicodeCharacter{0394}{\\ensuremath{\\Delta}}"
-    "\\DeclareUnicodeCharacter{03A9}{\\ensuremath{\\Omega}}");
-
-} // namespace
-
 void Exporter::exportMarkdown(const QString &markdown, const QString &dstPath,
                               const QString &format, QObject *context,
                               Completion completion)
 {
-    if (format != "html" && format != "pdf" && format != "latex") {
+    if (format != "html" && format != "pdf" && format != "latex"
+        && format != "docx") {
         completion(false, QString("Unsupported export format '%1'").arg(format));
         return;
     }
 
     QString temporaryOutput;
     if (format != "html") {
-        const QString extension = format == "pdf" ? ".pdf" : ".tex";
+        const QString extension = format == "pdf" ? ".pdf"
+                                : format == "docx" ? ".docx" : ".tex";
         QTemporaryFile temporary(
             QFileInfo(dstPath).dir().filePath(".mdraft-export-XXXXXX" + extension));
         temporary.setAutoRemove(false);
@@ -139,9 +117,14 @@ void Exporter::exportMarkdown(const QString &markdown, const QString &dstPath,
     if (format == "html")
         args << "--to=html";
     else if (format == "pdf")
-        args << "--pdf-engine=pdflatex"
-             << "--variable" << QStringLiteral("header-includes=%1").arg(kPdfUnicodeHeader)
+        args << "--pdf-engine=xelatex"
+             // DejaVu Sans covers common Unicode symbols and many emoji;
+             // XeLaTeX completes the document even when a rare glyph is not
+             // available, instead of pdflatex aborting on the code point.
+             << "--variable" << "mainfont=DejaVu Sans"
              << "--output" << temporaryOutput;
+    else if (format == "docx")
+        args << "--to=docx" << "--output" << temporaryOutput;
     else
         args << "--to=latex" << "--output" << temporaryOutput;
 

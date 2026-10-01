@@ -50,6 +50,7 @@ private slots:
     void exportHtml();
     void exportPdf();
     void exportLatex();
+    void exportDocx();
     void printDocument();
     // View
     void toggleLeftPanel();

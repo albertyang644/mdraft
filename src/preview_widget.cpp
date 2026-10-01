@@ -99,12 +99,19 @@ void PreviewWidget::ensureWebView()
     // so opening the panel never shows that transient frame.
     m_view->setVisible(false);
     connect(m_view, &QWebEngineView::loadFinished, this, [this](bool) {
+        // setHtml() reloads the page and resets its scroll to 0. Restore the
+        // last position so a re-render (every keystroke) doesn't jump.
+        m_reloading = false;
+        if (m_view && m_lastFraction > 0.0)
+            setScrollFraction(m_lastFraction);
         if (m_view && !m_view->isVisible())
             m_view->setVisible(true);
     });
 
     connect(m_view->page(), &QWebEnginePage::scrollPositionChanged, this,
             [this](const QPointF &position) {
+        if (m_reloading) // the reload's reset to 0 is not user input
+            return;
         const qreal span = m_view->page()->contentsSize().height() - m_view->height();
         if (span <= 1.0)
             return;
@@ -115,6 +122,7 @@ void PreviewWidget::ensureWebView()
         if (m_appliedFraction >= 0.0 && qAbs(fraction - m_appliedFraction) < 0.01)
             return;
         m_appliedFraction = -1.0;
+        m_lastFraction = fraction;
         emit scrolled(fraction);
     });
 
@@ -219,8 +227,10 @@ void PreviewWidget::renderHtml(const QString &html)
 {
 #ifdef MDRAFT_HAVE_WEBENGINE
     m_lastHtml = html;
-    if (m_view)
+    if (m_view) {
+        m_reloading = true;
         m_view->setHtml(html, QUrl("about:blank"));
+    }
 #else
     Q_UNUSED(html);
 #endif
@@ -258,6 +268,7 @@ void PreviewWidget::setScrollFraction(qreal fraction)
     if (!m_view)
         return;
     m_appliedFraction = qBound(0.0, fraction, 1.0);
+    m_lastFraction = m_appliedFraction;
     const QString js = QStringLiteral(
         "(function(){var e=document.documentElement;"
         "var m=Math.max(0,(e.scrollHeight||0)-(window.innerHeight||0));"

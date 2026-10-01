@@ -75,6 +75,8 @@ private:
     QTimer *m_conversionTimeout;
     QString m_convertingSource;     // source text the in-flight process was started with
     bool m_darkMode;
+    qreal m_lastFraction = 0.0;     // last known scroll position, reapplied after each reload
+    bool m_reloading = false;       // true between setHtml() and loadFinished
     qreal m_appliedFraction = -1.0; // last fraction we drove; used to spot our own echo
 #endif
 

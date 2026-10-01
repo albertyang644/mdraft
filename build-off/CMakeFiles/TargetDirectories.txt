@@ -1,9 +1,0 @@
-/home/albert/projects/mdraft/build-off/CMakeFiles/mdraft.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/edit_cache.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/rebuild_cache.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/list_install_components.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/install.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/install/local.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/install/strip.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/mdraft_autogen_timestamp_deps.dir
-/home/albert/projects/mdraft/build-off/CMakeFiles/mdraft_autogen.dir

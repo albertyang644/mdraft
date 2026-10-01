@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSettings>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -30,6 +31,7 @@ private slots:
     void reloadPullsExternalChanges();
     void keepingMyVersionUnblocksSavingAndClosing();
     void themeControlIsMonochrome();
+    void findAndReplaceUpdatesMatchCount();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -115,6 +117,25 @@ void MainWindowTest::themeControlIsMonochrome()
     verifyColor(QColor(Theme::LightText));
     window.applyDarkMode(true, false);
     verifyColor(QColor(Theme::DarkText));
+}
+
+void MainWindowTest::findAndReplaceUpdatesMatchCount()
+{
+    MainWindow window;
+    window.m_editor->setPlainText("alpha beta alpha");
+    window.showFindBar();
+    window.m_findEdit->setText("alpha");
+
+    QCOMPARE(window.m_findCountLabel->text(), QStringLiteral("2 matches"));
+    QVERIFY(window.m_editor->textCursor().hasSelection());
+    QCOMPARE(window.m_editor->textCursor().selectedText(), QStringLiteral("alpha"));
+
+    window.m_replaceEdit->setText("gamma");
+    window.replaceCurrent();
+    QCOMPARE(window.m_findCountLabel->text(), QStringLiteral("1 match"));
+    window.replaceAll();
+    QCOMPARE(window.m_editor->toPlainText(), QStringLiteral("gamma beta gamma"));
+    QCOMPARE(window.m_findCountLabel->text(), QStringLiteral("0 matches"));
 }
 
 void MainWindowTest::reloadPullsExternalChanges()

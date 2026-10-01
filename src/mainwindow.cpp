@@ -880,6 +880,7 @@ void MainWindow::createMenus()
     exportMenu->addAction(tr("Export &HTML…"), this, &MainWindow::exportHtml);
     exportMenu->addAction(tr("Export &PDF…"), this, &MainWindow::exportPdf);
     exportMenu->addAction(tr("Export &LaTeX…"), this, &MainWindow::exportLatex);
+    exportMenu->addAction(tr("Export &Word (docx)…"), this, &MainWindow::exportDocx);
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
@@ -1398,6 +1399,11 @@ void MainWindow::exportPdf()
 void MainWindow::exportLatex()
 {
     exportDocument("latex", tr("Export LaTeX"), ".tex", tr("LaTeX (*.tex)"));
+}
+
+void MainWindow::exportDocx()
+{
+    exportDocument("docx", tr("Export Word"), ".docx", tr("Word (*.docx)"));
 }
 
 void MainWindow::printDocument()
